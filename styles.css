@@ -725,6 +725,16 @@ select, input[type="text"] {
   font-weight: 650;
 }
 
+.turn-instructions { margin-top: 5px; }
+.turn-instructions summary { color: #aaccfa; cursor: pointer; }
+.turn-instructions p { margin: 6px 0; }
+.turn-instructions code { overflow-wrap: anywhere; }
+.official-matches { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.demo-options { margin-top: 10px; }
+.demo-options summary { cursor: pointer; }
+.demo-options .settings-fields { margin-top: 10px; }
+.checking-practice-access .page { visibility: hidden; }
+
 .rules-dialog {
   width: min(590px, calc(100% - 24px));
   max-height: calc(100% - 32px);

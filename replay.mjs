@@ -96,6 +96,38 @@ function validateBoardState(state) {
   }
 }
 
+function applyDecision(game, decision) {
+  for (let side = 0; side < 2; side++) if (decision.holds[side]) game.hold(side);
+  for (const [side, reason] of Object.entries(decision.failures)) {
+    if (!(side in game.failures)) game.fail(Number(side), reason);
+  }
+  for (const [side, commands] of Object.entries(decision.actions)) game.submit(Number(side), commands);
+  if (!equal(game.actions, decision.actions) || !equal(game.failures, decision.failures)
+      || !equal(game.players.map(player => player.hold_used), decision.holds)) {
+    throw new Error('记录的决策与实际执行结果不一致');
+  }
+  return game.settle();
+}
+
+export async function playOfficialReplay({header, decisions, result}) {
+  const game = await createDuel(header.seed, header.rules);
+  if (header.rules_sha256 !== game.rulesFingerprint ||
+      header.engine_version !== engineVersions.get(game.rules.profile)) {
+    throw new Error('官方回放规则与裁判版本不匹配。');
+  }
+  if (!Array.isArray(decisions) || decisions.length > MAX_TURNS) throw new Error('官方回放回合数无效。');
+  const frames = [makeFrame(game)], turns = [];
+  let event = null;
+  for (const decision of decisions) {
+    validateDecision(decision);
+    event = applyDecision(game, decision);
+    turns.push({type: 'TURN', decision: copy(decision), event, state: game.snapshot()});
+    frames.push(makeFrame(game, event));
+  }
+  if (!event || !equal(summarize(game, event), result)) throw new Error('官方回放赛果校验失败。');
+  return {header: copy(header), turns, frames, result: copy(result)};
+}
+
 /** Validate before exposing imported data to the controller or replacing a live match. */
 export async function validateReplay(text, {maxBytes = MAX_REPLAY_BYTES} = {}) {
   if (![MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES].includes(maxBytes)) throw new Error('无效的回放大小限制。');
@@ -134,16 +166,7 @@ export async function validateReplay(text, {maxBytes = MAX_REPLAY_BYTES} = {}) {
     validateDecision(record.decision);
     validateBoardState(record.state);
     try {
-      for (let side = 0; side < 2; side++) if (record.decision.holds[side]) game.hold(side);
-      for (const [side, reason] of Object.entries(record.decision.failures)) {
-        if (!(side in game.failures)) game.fail(Number(side), reason);
-      }
-      for (const [side, commands] of Object.entries(record.decision.actions)) game.submit(Number(side), commands);
-      if (!equal(game.actions, record.decision.actions) || !equal(game.failures, record.decision.failures)
-          || !equal(game.players.map(player => player.hold_used), record.decision.holds)) {
-        throw new Error('记录的决策与实际执行结果不一致');
-      }
-      last = game.settle();
+      last = applyDecision(game, record.decision);
     } catch (error) { throw new Error(`第 ${turns.length + 1} 回合的走法无效：${error.message}`); }
     if (!equal(last, record.event) || !equal(game.snapshot(), record.state)) {
       throw new Error(`第 ${turns.length + 1} 回合的棋盘或结算状态与重算结果不一致。`);

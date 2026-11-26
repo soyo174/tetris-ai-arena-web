@@ -1,8 +1,10 @@
 import {createDuel, PythonRandom, CELLS} from './engine.mjs';
-import {createHeader, makeFrame, playTurn, serializeReplay, summarize, validateReplay, replayBotModes, MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES} from './replay.mjs';
+import {apiFetch} from './api.mjs';
+import {createHeader, makeFrame, playOfficialReplay, playTurn, serializeReplay, summarize, validateReplay, replayBotModes, MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES} from './replay.mjs';
 
 const $ = id => document.getElementById(id);
 const NAMES = {greedy: '贪心 AI', random: '随机 AI', drop: '硬降 AI'};
+const OFFICIAL_NAMES = {strong: '强 Bot', medium: '中 Bot', weak: '弱 Bot'};
 const COLORS = {I: '#62d3ed', O: '#e8c86d', T: '#b895ed', S: '#70cfa9', Z: '#e98ca5', J: '#82aaf2', L: '#eab286', G: '#65758e', X: '#3a4359'};
 const clone = value => structuredClone(value);
 let session = null, viewIndex = 0, running = false, timer = null, busy = true, generation = 0;
@@ -98,6 +100,19 @@ function drawBoard(side, frame) {
   canvas.setAttribute('aria-label', `选手 ${letter.toUpperCase()} 的棋盘，10 列 24 行，第 ${frame.state.next_turn - 1} 回合`);
 }
 
+const eliminationReasons = new Map([
+  ['next_spawn_blocked', '下一块出生受阻'],
+  ['hold_spawn_blocked', '暂存后出生受阻'],
+  ['spawn_blocked', '出生受阻'],
+  ['garbage_overflow', '垃圾顶出'],
+  ['solid_overflow', '加时实心行顶出'],
+  ['thinking_timeout', 'Bot 响应超时'],
+  ['bot_eof', 'Bot 提前退出'],
+  ['bot_input_unavailable', 'Bot 无法接收观察'],
+  ['response_too_large', 'Bot 回复超过大小限制'],
+  ['invalid JSON response', 'Bot 回复不是有效的 JSON'],
+]);
+
 function description(event) {
   const messages = [];
   event.players.forEach((player, side) => {
@@ -106,11 +121,31 @@ function description(event) {
     if (player.sent) messages.push(`${who}发出 ${player.sent} 行攻击`);
     if (player.cancelled) messages.push(`${who}抵消 ${player.cancelled} 行`);
     if (player.risen) messages.push(`${who}升起 ${player.risen} 行垃圾`);
-    if (player.reasons.length) messages.push(`${who}出局`);
+    if (player.reasons.length) {
+      const reasons = player.reasons.map(reason => eliminationReasons.get(reason) ?? `Bot 失误（${reason}）`);
+      messages.push(`${who}出局 · ${reasons.join('、')}`);
+    }
   });
   if (event.solid_risen) messages.push('加时：双方升起 1 行实心行');
   if (!messages.length) messages.push('双方完成落块');
   return messages.join('；');
+}
+
+function turnInstructions(decision) {
+  const details = document.createElement('details');
+  details.className = 'turn-instructions';
+  const summary = document.createElement('summary');
+  summary.textContent = '查看本手指令';
+  details.append(summary);
+  for (const [side, hold] of decision.holds.entries()) {
+    const row = document.createElement('p'), route = document.createElement('code');
+    row.append(side ? 'B 方 ' : 'A 方 ');
+    const commands = [...(hold ? ['HOLD'] : []), ...(decision.actions[side] ?? [])];
+    route.textContent = commands.length ? commands.join(' · ') : '无有效走法';
+    row.append(route);
+    details.append(row);
+  }
+  return details;
 }
 
 function outcomeText(state) {
@@ -169,7 +204,11 @@ function render() {
     const li = document.createElement('li'), time = document.createElement('span'), detail = document.createElement('span');
     time.className = 'event-turn'; time.textContent = `T${String(event.turn).padStart(3, '0')}`;
     detail.className = 'event-description'; detail.textContent = description(event);
-    li.append(time, detail); feed.append(li);
+    li.append(time, detail);
+    if (event.turn === turn && session.turns[viewIndex - 1]) {
+      li.append(turnInstructions(session.turns[viewIndex - 1].decision));
+    }
+    feed.append(li);
   }
 }
 
@@ -260,8 +299,8 @@ async function loadLadderReplay(matchId) {
   paused(); busy = true; feedback('正在下载并重算天梯对局…'); render();
   try {
     const [metadataResponse, replayResponse] = await Promise.all([
-      fetch(`/api/matches/${matchId}`, {credentials: 'same-origin'}),
-      fetch(`/api/matches/${matchId}/replay`, {credentials: 'same-origin'})
+      apiFetch(`/api/matches/${matchId}`),
+      apiFetch(`/api/matches/${matchId}/replay`)
     ]);
     if (!metadataResponse.ok || !replayResponse.ok) throw new Error('无法获取该对局，请确认天梯服务正在运行。');
     if (Number(replayResponse.headers.get('content-length')) > MAX_SERVER_REPLAY_BYTES) throw new Error('服务器回放超过 32 MiB。');
@@ -270,11 +309,41 @@ async function loadLadderReplay(matchId) {
     if (token !== generation) return;
     if (!replay.result) throw new Error('天梯比赛缺少完整赛果。');
     acceptReplay(replay, [metadata.a, metadata.b].map(bot => `${bot.name} · v${bot.version}`));
+    if (metadata.practice) {
+      session.practiceMatch = matchId;
+      if (document.hidden) concealPracticeReplay();
+    }
     feedback(`天梯对局已通过 ${replay.turns.length} 回合重算校验，点击播放开始观看。`);
   } catch (error) {
     if (token !== generation) return;
     busy = false; render(); feedback(`载入天梯回放失败：${error.message}`, true);
   }
+}
+
+let officialReplays;
+async function loadOfficialReplay(id, autoplay) {
+  const token = ++generation;
+  paused(); busy = true; feedback('正在校验官方 Bot 回放…'); render();
+  try {
+    officialReplays ??= fetch(new URL('./examples/official-replays.json', import.meta.url)).then(response => {
+      if (!response.ok) throw new Error('官方回放暂不可用。');
+      return response.json();
+    }).catch(error => { officialReplays = null; throw error; });
+    const match = (await officialReplays).find(entry => entry.id === id);
+    if (!match) throw new Error('没有找到这组官方 Bot 回放。');
+    const replay = await playOfficialReplay(match);
+    if (token !== generation) return;
+    acceptReplay(replay, id.split('-').map(tier => OFFICIAL_NAMES[tier]));
+    if (autoplay) resume();
+    feedback(`官方 Bot 实战回放 · ${replay.turns.length} 回合`);
+  } catch (error) {
+    if (token !== generation) return;
+    busy = false; render(); feedback(error.message, true);
+  }
+}
+
+for (const button of document.querySelectorAll('[data-official]')) {
+  button.addEventListener('click', () => void loadOfficialReplay(button.dataset.official, true));
 }
 
 $('replay-file').addEventListener('change', async event => {
@@ -305,7 +374,37 @@ document.addEventListener('keydown', event => {
   if (event.target.closest('input, select, button, textarea, a')) return;
   event.preventDefault(); $('pause-match').click();
 });
-document.addEventListener('visibilitychange', () => {if (document.hidden && running) {paused(); render();}});
+function concealPracticeReplay() {
+  if (session?.practiceMatch) document.body.classList.add('checking-practice-access');
+}
+
+async function restorePracticeAccess() {
+  if (!session?.practiceMatch || document.hidden || !document.body.classList.contains('checking-practice-access')) return;
+  const current = session;
+  let allowed = false;
+  try {
+    const response = await apiFetch(`/api/matches/${current.practiceMatch}`, {
+      cache: 'no-store', signal: AbortSignal.timeout(5000),
+    });
+    allowed = response.ok;
+  } catch { /* Keep the replay private if the service cannot recheck access. */ }
+  if (session !== current || document.hidden) return;
+  if (!allowed) {
+    session = null;
+    await newMatch(7, ['greedy', 'greedy'], {autoplay: false, demo: true});
+    feedback('当前无法访问此自定义回放，请登录发起对局的账号后重新打开。', true);
+  }
+  document.body.classList.remove('checking-practice-access');
+}
+
+window.addEventListener('pagehide', concealPracticeReplay);
+window.addEventListener('pageshow', () => void restorePracticeAccess());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (running) {paused(); render();}
+    concealPracticeReplay();
+  } else void restorePracticeAccess();
+});
 
 try {
   const stored = JSON.parse(localStorage.getItem('tetra-arena-settings') || 'null');
@@ -316,3 +415,4 @@ try {
 const requestedMatch = new URLSearchParams(location.search).get('match');
 await newMatch(7, ['greedy', 'greedy'], {autoplay: false, demo: !requestedMatch});
 if (requestedMatch) await loadLadderReplay(requestedMatch);
+else await loadOfficialReplay('strong-medium', false);

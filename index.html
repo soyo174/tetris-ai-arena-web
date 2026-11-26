@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
+  <meta name="tetra-api-base" content="https://129.204.38.227/tetra-arena/">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#080d19">
@@ -58,7 +59,7 @@
         <div class="match-controls" role="group" aria-label="对战控制">
           <button class="button button-primary" id="start-match" type="button">
             <svg class="icon" aria-hidden="true"><use href="#icon-play"/></svg>
-            开始新对局
+            运行本地演示
           </button>
           <div class="playback-buttons">
             <button class="button" id="pause-match" type="button" disabled>
@@ -179,8 +180,17 @@
     <div class="support-panels">
       <section class="surface settings" aria-labelledby="settings-heading">
         <h2 class="section-heading" id="settings-heading">
-          <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>对局设置
+          <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>官方 Bot 对战
         </h2>
+        <div class="official-matches" aria-label="选择官方 Bot 回放">
+          <button class="button" type="button" data-official="strong-medium">强 Bot 对中 Bot</button>
+          <button class="button" type="button" data-official="strong-weak">强 Bot 对弱 Bot</button>
+          <button class="button" type="button" data-official="medium-weak">中 Bot 对弱 Bot</button>
+        </div>
+        <a class="button button-quiet" href="./ladder.html#custom-match">选择或上传双方 Bot</a>
+        <a class="button button-quiet" href="/api/referee/download" data-arena-referee download>下载本地裁判</a>
+        <details class="demo-options">
+        <summary>本地演示设置</summary>
         <div class="settings-fields">
           <div class="field">
             <label for="bot-a"><span class="label-dot label-dot-a" aria-hidden="true"></span>选手 A 策略</label>
@@ -203,7 +213,8 @@
             <input id="seed" type="text" inputmode="numeric" value="7" autocomplete="off" spellcheck="false">
           </div>
         </div>
-        <p class="section-note">设置将在开始新对局时生效。</p>
+        <p class="section-note">设置将在运行本地演示时生效。</p>
+        </details>
       </section>
 
       <section class="surface replay" aria-labelledby="replay-heading">
