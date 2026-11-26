@@ -2,6 +2,8 @@
 
 这个仓库是 TETRA ARENA 的公开静态网页镜像，提供浏览器 AI 方块对战、图解规则、本地 JSONL 回放和 Python Bot 示例下载。
 
+**公网访问：[https://soyo174.github.io/tetris-ai-arena-web/](https://soyo174.github.io/tetris-ai-arena-web/)**
+
 原始项目 `soyo174/tetris-ai-arena` 保持私有。本仓库只收录公开网页及示例文件，不包含 Python 天梯服务、账号数据、参赛者上传源码或私有比赛数据。
 
 ## 页面与示例
@@ -22,7 +24,7 @@
 
 GitHub Pages 使用 **Deploy from a branch**，发布源为 **`main` 分支的仓库根目录 `/ (root)`**。推送更新到 `main` 后，GitHub Pages 自动发布静态文件，无需安装依赖或构建前端。
 
-同步时复制原始项目 `web/dist` 中已跟踪的公开文件（此静态发布不使用 `ladder.js`），保留本仓库的 `ladder.html` 说明页和本 README。不要同步 Python 缓存、服务器目录或比赛数据。
+同步时复制原始项目 `web/dist` 中已跟踪的公开文件（此静态发布不使用 `ladder.js`），保留本仓库的 `ladder.html` 说明页、本 README，以及 `rules.html` 中的在线天梯和上传服务状态说明。不要同步 Python 缓存、服务器目录或比赛数据。
 
 所有页面、脚本、样式和下载链接使用相对路径，支持 GitHub Pages 的仓库子路径。
 
