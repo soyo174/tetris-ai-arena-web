@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d19">
+  <meta name="description" content="观看天梯 Bot 的真实比赛回放，或配置基准 AI 逐回合对战。">
+  <title>TETRA ARENA · AI 方块竞技场</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-book" viewBox="0 0 24 24"><path d="M12 6c-2-2-5-2.5-9-2v15c4-.5 7 0 9 2 2-2 5-2.5 9-2V4c-4-.5-7 0-9 2Zm0 0v15"/></symbol>
+    <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M9 5v14m6-14v14" stroke-width="2.5"/></symbol>
+    <symbol id="icon-step" viewBox="0 0 24 24"><path d="m5 6 9 6-9 6V6Z" fill="currentColor" stroke="none"/><path d="M18 5v14" stroke-width="2.5"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--icon-knob, #10192b)"/><circle cx="15" cy="17" r="2.5" fill="var(--icon-knob, #10192b)"/></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="icon-events" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 13h6m-6 4h6"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <div class="site-header-inner">
+      <div class="brand">
+        <img src="./favicon.svg" class="brand-mark" width="46" height="46" alt="">
+        <div class="brand-text">
+          <p class="brand-name" lang="en">TETRA ARENA</p>
+          <h1>AI 方块竞技场</h1>
+        </div>
+      </div>
+      <nav class="arena-nav" aria-label="主导航">
+        <a href="./ladder.html">天梯</a>
+        <a href="./index.html" aria-current="page">观战</a>
+        <a href="./rules.html">规则</a>
+      </nav>
+      <button class="button button-quiet arena-quick-rules" id="rules-open" type="button" aria-haspopup="dialog" aria-controls="rules-dialog">
+        <svg class="icon" aria-hidden="true"><use href="#icon-book"/></svg>
+        规则速览
+      </button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="arena" aria-label="对战场地">
+      <div class="match-center">
+        <div class="match-summary">
+          <p class="match-status" id="match-status" role="status">载入中</p>
+          <p class="round"><span class="round-label">回合</span><span class="round-number" id="turn">—</span></p>
+          <p class="match-detail" id="match-detail"></p>
+        </div>
+
+        <div class="versus" aria-hidden="true"><span>VS</span></div>
+
+        <div class="match-controls" role="group" aria-label="对战控制">
+          <button class="button button-primary" id="start-match" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#icon-play"/></svg>
+            开始新对局
+          </button>
+          <div class="playback-buttons">
+            <button class="button" id="pause-match" type="button" disabled>
+              <svg class="icon pause-icon" aria-hidden="true"><use href="#icon-pause"/></svg>
+              <svg class="icon resume-icon" aria-hidden="true"><use href="#icon-play"/></svg>
+              <span id="pause-label">暂停</span>
+            </button>
+            <button class="button" id="step-match" type="button" disabled>
+              <svg class="icon" aria-hidden="true"><use href="#icon-step"/></svg>
+              单步
+            </button>
+          </div>
+          <div class="playback-options">
+            <label class="speed-label" for="speed">速度</label>
+            <select id="speed" class="speed-select">
+              <option value="1">1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+            <button class="button button-restart" id="restart-match" type="button">
+              重开
+            </button>
+          </div>
+        </div>
+
+        <p class="match-message" id="match-message" role="status"></p>
+
+        <ul class="legend" aria-label="棋盘图例">
+          <li><span class="legend-swatch legend-spawn" aria-hidden="true"></span>出生区</li>
+          <li><span class="legend-swatch legend-ghost" aria-hidden="true"></span>落点预览</li>
+          <li><span class="legend-swatch legend-garbage" aria-hidden="true"></span>垃圾行</li>
+          <li><span class="legend-swatch legend-solid" aria-hidden="true"></span>加时实心行</li>
+        </ul>
+      </div>
+
+      <section class="player player-a" aria-labelledby="player-heading-a">
+        <header class="player-header">
+          <div class="seat" aria-hidden="true">A</div>
+          <div class="player-title">
+            <h2 id="player-heading-a">选手 A</h2>
+            <p class="player-bot" id="bot-name-a">—</p>
+          </div>
+          <span class="player-state" id="player-state-a"></span>
+        </header>
+        <div class="player-field">
+          <div class="board-frame">
+            <canvas id="board-a" width="300" height="720" role="img" aria-label="选手 A 的棋盘，10 列 24 行">选手 A 的棋盘</canvas>
+          </div>
+          <div class="player-previews">
+            <div class="preview">
+              <p>当前块</p>
+              <canvas id="current-a" width="120" height="64" role="img" aria-label="选手 A 的当前块">当前块</canvas>
+            </div>
+            <div class="preview">
+              <p>下一块</p>
+              <canvas id="next-a" width="120" height="64" role="img" aria-label="选手 A 的下一块">下一块</canvas>
+            </div>
+            <div class="preview">
+              <p>暂存</p>
+              <canvas id="hold-a" width="120" height="64" role="img" aria-label="选手 A 的暂存方块">暂存方块</canvas>
+            </div>
+            <div class="incoming">
+              <div class="incoming-label"><span>来袭预警</span><strong id="warning-a">0</strong></div>
+              <meter id="warning-meter-a" value="0" min="0" max="24" aria-label="选手 A 的来袭垃圾行">0</meter>
+            </div>
+          </div>
+        </div>
+        <dl class="player-stats">
+          <div><dt>消行</dt><dd id="lines-a">—</dd></div>
+          <div><dt>攻击</dt><dd id="sent-a">—</dd></div>
+          <div><dt>连击</dt><dd id="combo-a">—</dd></div>
+          <div><dt>背靠背</dt><dd id="b2b-a">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="player player-b" aria-labelledby="player-heading-b">
+        <header class="player-header">
+          <div class="seat" aria-hidden="true">B</div>
+          <div class="player-title">
+            <h2 id="player-heading-b">选手 B</h2>
+            <p class="player-bot" id="bot-name-b">—</p>
+          </div>
+          <span class="player-state" id="player-state-b"></span>
+        </header>
+        <div class="player-field">
+          <div class="board-frame">
+            <canvas id="board-b" width="300" height="720" role="img" aria-label="选手 B 的棋盘，10 列 24 行">选手 B 的棋盘</canvas>
+          </div>
+          <div class="player-previews">
+            <div class="preview">
+              <p>当前块</p>
+              <canvas id="current-b" width="120" height="64" role="img" aria-label="选手 B 的当前块">当前块</canvas>
+            </div>
+            <div class="preview">
+              <p>下一块</p>
+              <canvas id="next-b" width="120" height="64" role="img" aria-label="选手 B 的下一块">下一块</canvas>
+            </div>
+            <div class="preview">
+              <p>暂存</p>
+              <canvas id="hold-b" width="120" height="64" role="img" aria-label="选手 B 的暂存方块">暂存方块</canvas>
+            </div>
+            <div class="incoming">
+              <div class="incoming-label"><span>来袭预警</span><strong id="warning-b">0</strong></div>
+              <meter id="warning-meter-b" value="0" min="0" max="24" aria-label="选手 B 的来袭垃圾行">0</meter>
+            </div>
+          </div>
+        </div>
+        <dl class="player-stats">
+          <div><dt>消行</dt><dd id="lines-b">—</dd></div>
+          <div><dt>攻击</dt><dd id="sent-b">—</dd></div>
+          <div><dt>连击</dt><dd id="combo-b">—</dd></div>
+          <div><dt>背靠背</dt><dd id="b2b-b">—</dd></div>
+        </dl>
+      </section>
+    </section>
+
+    <div class="support-panels">
+      <section class="surface settings" aria-labelledby="settings-heading">
+        <h2 class="section-heading" id="settings-heading">
+          <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>对局设置
+        </h2>
+        <div class="settings-fields">
+          <div class="field">
+            <label for="bot-a"><span class="label-dot label-dot-a" aria-hidden="true"></span>选手 A 策略</label>
+            <select id="bot-a">
+              <option value="greedy" selected>贪心策略</option>
+              <option value="random">随机策略</option>
+              <option value="drop">垂直硬降</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="bot-b"><span class="label-dot label-dot-b" aria-hidden="true"></span>选手 B 策略</label>
+            <select id="bot-b">
+              <option value="greedy" selected>贪心策略</option>
+              <option value="random">随机策略</option>
+              <option value="drop">垂直硬降</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="seed">随机种子</label>
+            <input id="seed" type="text" inputmode="numeric" value="7" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <p class="section-note">设置将在开始新对局时生效。</p>
+      </section>
+
+      <section class="surface replay" aria-labelledby="replay-heading">
+        <h2 class="section-heading" id="replay-heading">
+          <svg class="icon" aria-hidden="true"><use href="#icon-clock"/></svg>回放
+        </h2>
+        <div class="timeline-heading">
+          <label for="timeline">回放进度</label>
+          <output id="timeline-value" for="timeline" aria-live="off">0 / 0</output>
+        </div>
+        <input id="timeline" type="range" value="0" min="0" max="0" step="1" disabled>
+        <div class="replay-buttons">
+          <button class="button button-quiet" id="import-replay" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#icon-file"/></svg>导入回放
+          </button>
+          <button class="button button-quiet" id="export-replay" type="button" disabled>
+            <svg class="icon" aria-hidden="true"><use href="#icon-file"/></svg>导出回放
+          </button>
+          <input id="replay-file" type="file" accept=".jsonl,.ndjson,application/json,application/jsonl,application/x-ndjson" hidden>
+        </div>
+      </section>
+
+      <section class="surface events" aria-labelledby="events-heading">
+        <h2 class="section-heading" id="events-heading">
+          <svg class="icon" aria-hidden="true"><use href="#icon-events"/></svg>对局动态
+        </h2>
+        <ol class="event-feed" id="event-feed" aria-label="最近事件" tabindex="0">
+          <li class="empty-event">等待对局动态</li>
+        </ol>
+      </section>
+    </div>
+  </main>
+
+  <dialog class="rules-dialog" id="rules-dialog" aria-labelledby="rules-heading">
+    <div class="dialog-header">
+      <h2 id="rules-heading">对战规则</h2>
+      <form method="dialog">
+        <button class="button button-icon" type="submit" aria-label="关闭规则" autofocus>
+          <svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg>
+        </button>
+      </form>
+    </div>
+    <div class="rules-content">
+      <p>双方 AI 每回合各落定一块，裁判同时结算。只有一方出局时，对手获胜。双方在同一回合出局时，判为平局。</p>
+
+      <h3>棋盘与发块</h3>
+      <p>棋盘有 10 列 24 行，上方 4 行是出生缓冲区。双方各用一条由种子和座位确定的独立七袋序列，每袋包含七种方块。每回合可以暂存或交换一次方块，并能预览自己的下一块。</p>
+
+      <h3>消行与攻击</h3>
+      <div class="rules-table">
+        <table>
+          <thead><tr><th scope="col">消行方式</th><th scope="col">一行</th><th scope="col">两行</th><th scope="col">三行</th><th scope="col">四行</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">普通</th><td>0</td><td>1</td><td>2</td><td>4</td></tr>
+            <tr><th scope="row">完整 T 旋</th><td>2</td><td>4</td><td>6</td><td>—</td></tr>
+            <tr><th scope="row">T 旋 Mini</th><td>0</td><td>按完整</td><td>按完整</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>四消或完整 T 旋消行可开启背靠背，后续再达成时攻击加 1。连击从连续消行的第 3 手开始增加攻击。全消时攻击至少为 10 行。</p>
+
+      <h3>垃圾行与加时</h3>
+      <p>本回合的攻击先抵消自己的旧预警，余量随后发给对手。对手下一回合看到预警，有一手可以抵消。未被抵消的到期垃圾升在实心底层上方，没有实心层时从棋盘底部升起。</p>
+      <p>第 210 回合结束时首次加时，之后每 10 回合双方各在棋盘最底部增加一行实心行。实心层始终连续贴底。已锁定的方块被顶出棋盘，或下一块无法出生时，该方出局。</p>
+
+      <h3>网页与回放</h3>
+      <p>网页内运行贪心、随机和硬降三种基准 AI。你自己的 Python 或 C++ AI 可以先通过裁判完成对局，再导入 JSONL 回放观看。本地比赛和回放校验在当前浏览器进行。</p>
+      <p>新对局使用裁判 v0.2.0 默认规则 reference-provisional-v2。历史 v0.1.0 默认回放按旧规则重算。整数种子范围为 ±9007199254740991，手工导入上限为 8 MiB、2000 回合。未结束的对局可以导出为阶段回放。网页演示不执行正式比赛的进程思考时限。</p>
+    </div>
+    <form method="dialog" class="dialog-actions">
+      <button class="button button-primary" type="submit">关闭</button>
+    </form>
+  </dialog>
+</body>
+</html>

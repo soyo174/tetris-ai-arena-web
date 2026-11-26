@@ -1,0 +1,261 @@
+"""TETRA ARENA deterministic baseline source; build the two standalone files.
+
+Only public observations are used. Search bounds and tie breaking are fixed;
+there is no random generator, clock cutoff, persistent state or external import.
+"""
+from collections import deque, namedtuple
+import json
+import sys
+
+LEVEL = 'medium'  # Generated from bots/baseline_core.py; edit the source and rebuild.
+VERSION = '1.0.0'
+FULL = 1023
+Placement = namedtuple('Placement', 'rows solids lines spin perfect_clear commands')
+
+
+class Model:
+    def __init__(self, observation):
+        self.observation = observation
+        self.rules = observation['rules']
+        geometry = observation['geometry']
+        self.cells = {p: tuple(tuple(tuple(c) for c in rotation) for rotation in values)
+                      for p, values in geometry['cells'].items()}
+        self.kicks90 = geometry['kicks_90']
+        self.kicks180 = geometry['kicks_180']
+        self.rows = tuple(sum(1 << x for x, c in enumerate(row) if c)
+                          for row in observation['self']['board'])
+        self.solids = tuple(3 in row for row in observation['self']['board'])
+        self.values = {}
+
+    def landings(self, piece, rows=None, solids=None, full=False):
+        rows = self.rows if rows is None else rows
+        solids = self.solids if solids is None else solids
+        cells = self.cells[piece]
+        fit_cache, fall_cache = {}, {}
+
+        def fits(x, y, rotation):
+            key = (x, y, rotation)
+            if key not in fit_cache:
+                fit_cache[key] = all(0 <= x + dx < 10 and 0 <= y + dy < 24
+                                    and not rows[y + dy] & (1 << (x + dx))
+                                    for dx, dy in cells[rotation])
+            return fit_cache[key]
+
+        def step(pose, command):
+            x, y, r, spin = pose
+            if command in ('LEFT', 'RIGHT', 'DOWN'):
+                dx, dy = {'LEFT': (-1, 0), 'RIGHT': (1, 0), 'DOWN': (0, -1)}[command]
+                return (x + dx, y + dy, r, 0) if fits(x + dx, y + dy, r) else pose
+            delta = {'CW': 1, 'CCW': -1, 'ROT180': 2}[command]
+            nr = (r + delta) % 4
+            offsets = self.kicks180 if delta == 2 else self.kicks90[piece][f'{r}:{nr}']
+            for index, (dx, dy) in enumerate(offsets, 1):
+                if fits(x + dx, y + dy, nr):
+                    flag = (2 if delta != 2 and index == 5 else 1) if piece == 'T' else 0
+                    return x + dx, y + dy, nr, flag
+            return pose
+
+        def fall(pose):
+            x, y, r, spin = pose
+            key = (x, y, r)
+            if key not in fall_cache:
+                target, trail = y, []
+                while fits(x, target - 1, r):
+                    trail.append((x, target, r))
+                    target -= 1
+                    if (x, target, r) in fall_cache:
+                        target = fall_cache[x, target, r]
+                        break
+                fall_cache[key] = target
+                for visited in trail:
+                    fall_cache[visited] = target
+            target = fall_cache[key]
+            return x, target, r, spin if target == y else 0
+
+        start = (*self.rules['spawn_origins'][piece], 0, 0)
+        if not fits(*start[:3]):
+            return []
+        finals, result = set(), []
+
+        def add(pose, commands):
+            x, y, r, flag = fall(pose)
+            occupied = tuple(sorted((x + dx, y + dy) for dx, dy in cells[r]))
+            spin = 'none'
+            packed = list(rows)
+            for col, row in occupied:
+                packed[row] |= 1 << col
+            cleared = [index for index, mask in enumerate(packed) if mask == FULL and not solids[index]]
+            if piece == 'T' and flag:
+                def corner(cx, cy):
+                    return cx < 0 or cx >= 10 or cy < 0 or (cy < 24 and bool(packed[cy] & (1 << cx)))
+                corners = (corner(x, y + 2), corner(x + 2, y + 2), corner(x + 2, y), corner(x, y))
+                if sum(corners) >= 3:
+                    spin = 'full' if ((corners[r] and corners[(r + 1) % 4]) or len(cleared) >= 2 or flag == 2) else 'mini'
+            key = occupied, spin
+            if key in finals:
+                return
+            finals.add(key)
+            kept = tuple(mask for i, mask in enumerate(packed) if i not in cleared)
+            kept_solids = tuple(s for i, s in enumerate(solids) if i not in cleared)
+            result.append(Placement(kept + (0,) * len(cleared), kept_solids + (False,) * len(cleared),
+                                    len(cleared), spin, not any(kept), [*commands, 'HARD_DROP']))
+
+        if full:
+            queue = deque([(start, ())])
+            seen = {start}
+            commands = ('LEFT', 'RIGHT', 'DOWN', 'CW', 'CCW', 'ROT180')
+            if len(set(cells)) == 1:
+                commands = ('LEFT', 'RIGHT', 'DOWN')
+            while queue:
+                pose, route = queue.popleft()
+                add(pose, route)
+                if len(route) >= self.rules['max_commands'] - 1:
+                    continue
+                for command in commands:
+                    moved = step(pose, command)
+                    if moved not in seen:
+                        seen.add(moved)
+                        queue.append((moved, (*route, command)))
+        else:
+            for rotation in ((), ('CW',), ('ROT180',), ('CCW',)):
+                rotated = step(start, rotation[0]) if rotation else start
+                for shift in range(-5, 6):
+                    route = rotation + (('LEFT' if shift < 0 else 'RIGHT'),) * abs(shift)
+                    pose = rotated
+                    for command in route[len(rotation):]:
+                        pose = step(pose, command)
+                    add(pose, route)
+        return result
+
+    def board_value(self, rows, solids):
+        key = rows, solids
+        cached = self.values.get(key)
+        if cached is not None:
+            return cached
+        base = 0
+        while base < 24 and solids[base] and rows[base] == FULL:
+            base += 1
+        columns = [0] * 10
+        for y, row in enumerate(rows):
+            if not row:
+                continue
+            bit = 1 << y
+            for x in range(10):
+                if row & (1 << x):
+                    columns[x] |= bit
+        heights = [col.bit_length() for col in columns]
+        holes = covered = 0
+        floor_mask = (1 << base) - 1
+        for col, height in zip(columns, heights):
+            gaps = ((1 << height) - 1) & ~col & ~floor_mask
+            holes += gaps.bit_count()
+            while gaps:
+                gap = gaps & -gaps
+                covered += (col >> gap.bit_length()).bit_count()
+                gaps -= gap
+        relative = [max(0, h - base) for h in heights]
+        roughness = sum(abs(a - b) for a, b in zip(relative, relative[1:]))
+        peak = max(heights)
+        if LEVEL == 'medium':
+            value = (-52 * sum(relative) - 280 * holes - 22 * roughness
+                     - 15 * max(relative) - 100 * max(0, peak - 19) ** 2)
+        else:
+            value = (-35 * sum(relative) - 400 * holes - 35 * covered - 16 * roughness
+                     - 3 * max(relative) ** 2 - 250 * max(0, peak - 16) ** 2)
+        self.values[key] = value
+        return value
+
+    def attack(self, placement, combo, b2b):
+        lines, spin = placement.lines, placement.spin
+        if not lines:
+            return 0, 0, b2b
+        combo += 1
+        difficult = lines == 4 or spin == 'full' or (spin == 'mini' and lines >= 2)
+        attack = self.rules['tspin_attack' if spin == 'full' or (spin == 'mini' and lines >= 2) else 'normal_attack'][lines]
+        if difficult:
+            attack += self.rules['b2b_bonus'] if b2b else 0
+            b2b = True
+        elif spin != 'mini':
+            b2b = False
+        attack += sum(combo > bound for bound in (2, 5, 7, 9, 12))
+        if placement.perfect_clear:
+            attack = max(attack, self.rules['perfect_clear_floor'])
+        return attack, combo, b2b
+
+    def imminent_cost(self, placement, attack):
+        due = 0
+        turn = self.observation['turn']
+        for warning in self.observation['self']['warnings']:
+            remaining = max(0, warning['lines'] - attack)
+            attack = max(0, attack - warning['lines'])
+            if warning['due'] <= turn:
+                due += remaining
+        overtime = (turn >= self.rules['overtime_first'] and
+                    (turn - self.rules['overtime_first']) % self.rules['overtime_interval'] == 0)
+        peak = max((y + 1 for y, row in enumerate(placement.rows) if row), default=0)
+        return 220 * max(0, peak + due + overtime - 18) ** 2 + 25 * due
+
+    def ranked(self, piece, combo, b2b, full):
+        options = []
+        for placement in self.landings(piece, full=full):
+            attack, next_combo, next_b2b = self.attack(placement, combo, b2b)
+            reward = (120 * placement.lines + 25 * attack if LEVEL == 'medium'
+                      else 45 * placement.lines + 160 * attack)
+            cost = self.imminent_cost(placement, attack)
+            value = self.board_value(placement.rows, placement.solids) + reward - cost
+            options.append((value, placement, reward, cost, next_combo, next_b2b))
+        # Stable enumeration breaks exact ties; no unordered containers decide a move.
+        options.sort(key=lambda item: item[0], reverse=True)
+        return options
+
+    def search(self, piece, combo, b2b, next_piece):
+        options = self.ranked(piece, combo, b2b, full=True)
+        if not options:
+            return -10**12, None, -10**12
+        if LEVEL != 'strong' or next_piece is None:
+            return options[0][0], options[0][1], options[0][0]
+        best = None
+        # Fixed beam width: runtime never changes the chosen policy.
+        for immediate, placement, reward, cost, next_combo, next_b2b in options[:8]:
+            future = -10**12
+            for child in self.landings(next_piece, placement.rows, placement.solids):
+                attack, _, _ = self.attack(child, next_combo, next_b2b)
+                value = self.board_value(child.rows, child.solids) + 36 * child.lines + 128 * attack
+                if value > future:
+                    future = value
+            total = future + reward - cost
+            if best is None or total > best[0]:
+                best = total, placement, immediate
+        return best
+
+
+def decide(observation):
+    own = observation['self']
+    model = Model(observation)
+    combo, b2b = own['combo'], own['b2b']
+    value, placement, immediate = model.search(own['current'], combo, b2b, own['next'])
+    if own['can_hold']:
+        alternative = own['hold'] if own['hold'] is not None else own['next']
+        next_piece = own['next'] if own['hold'] is not None else None
+        other, _, _ = model.search(alternative, combo, b2b, next_piece)
+        # With an empty Hold the following piece is hidden. Compare one-ply
+        # scores with a fixed uncertainty margin, never peek at the seed/bag.
+        reference = immediate if next_piece is None else value
+        margin = 80 if LEVEL == 'medium' else (120 if next_piece is None else 45)
+        if other > reference + margin:
+            return 'HOLD', None
+    return 'PLAY', placement.commands if placement is not None else ['HARD_DROP']
+
+
+def serve():
+    for line in sys.stdin:
+        request = json.loads(line)
+        kind, commands = decide(request['observation'])
+        response = {'type': kind, 'request_id': request['request_id']}
+        if kind == 'PLAY':
+            response['commands'] = commands
+        print(json.dumps(response, separators=(',', ':')), flush=True)
+
+
+if __name__ == '__main__':
+    serve()

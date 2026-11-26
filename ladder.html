@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d19">
+  <meta name="description" content="体验浏览器 AI 方块对战、阅读图解规则、观看本地回放，并下载 Python Bot 示例。">
+  <title>天梯说明 · TETRA ARENA</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./ladder.css">
+  <style>
+    .public-label { justify-self: end; color: var(--ink-muted); font-size: .875rem; white-space: nowrap; }
+    .public-notice { margin-top: 18px; padding: 20px 24px; border-left: 3px solid var(--lilac); }
+    .public-notice h2 { font-size: 18px; }
+    .public-notice p { margin-top: 7px; color: var(--ink-muted); font-size: 1rem; line-height: 1.8; }
+    .public-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; align-items: start; }
+    .public-content { padding: 0 20px 20px; }
+    .feature-list, .download-list { list-style: none; margin: 0; padding: 0; }
+    .feature-list li { padding-block: 16px; border-top: 1px solid var(--panel-line); }
+    .feature-list li:first-child { padding-top: 0; border-top: 0; }
+    .feature-list li:last-child { padding-bottom: 0; }
+    .feature-list h3 { font-size: 16px; }
+    .feature-list p { margin-top: 5px; color: var(--ink-muted); font-size: 1rem; line-height: 1.75; }
+    .feature-list a { display: inline-block; margin-top: 8px; font-size: 14px; text-underline-offset: .24em; }
+    .download-list { display: grid; gap: 10px; }
+    .download-list a { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 67px; padding: 12px 14px; border: 1px solid var(--panel-line); border-radius: 9px; background: var(--input-base); text-decoration: none; }
+    .download-list a:hover { border-color: #6781ae; background: #16243b; }
+    .download-list strong { display: block; color: var(--text); font-size: 1rem; }
+    .download-list small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: .875rem; }
+    .download-action { flex-shrink: 0; font-size: .875rem; font-weight: 650; }
+    .download-note { margin-top: 13px; color: var(--ink-muted); font-size: .875rem; line-height: 1.75; }
+    @media (max-width: 775px) { .public-grid { grid-template-columns: minmax(0, 1fr); } }
+    @media (max-width: 530px) {
+      .public-label { font-size: .875rem; }
+      .public-notice { padding: 17px 16px; }
+      .public-content { padding: 0 13px 17px; }
+    }
+  </style>
+</head>
+<body class="ladder-page">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header ladder-header">
+    <div class="site-header-inner">
+      <a class="brand" href="./index.html">
+        <img class="brand-mark" src="./favicon.svg" width="40" height="40" alt="">
+        <span class="brand-text">
+          <span class="brand-name" lang="en">TETRA ARENA</span>
+          <span class="brand-subtitle">AI 方块竞技场</span>
+        </span>
+      </a>
+      <nav class="ladder-nav" aria-label="主导航">
+        <a href="./ladder.html" aria-current="page">天梯说明</a>
+        <a href="./index.html">观战</a>
+        <a href="./rules.html">规则</a>
+      </nav>
+      <span class="public-label">浏览器体验</span>
+    </div>
+  </header>
+
+  <main class="page ladder-main" id="main" tabindex="-1">
+    <section class="ladder-hero" aria-labelledby="ladder-title">
+      <div class="hero-content">
+        <p class="season-chip">公开体验</p>
+        <h1 id="ladder-title">方块天梯</h1>
+        <p class="hero-description">从一场 AI 对战开始，看看消行、攻击与防守如何决定胜负。无需账号，即可在浏览器里体验竞技场。</p>
+        <div class="hero-actions">
+          <a class="button hero-primary" href="./index.html">开始浏览器对战</a>
+          <a class="button hero-secondary" href="./rules.html">阅读图解规则</a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="art-board">
+          <div class="art-piece art-piece-t"><i></i><i></i><i></i><i></i></div>
+          <div class="art-piece art-piece-j"><i></i><i></i><i></i><i></i></div>
+          <div class="art-piece art-piece-s"><i></i><i></i><i></i><i></i></div>
+          <div class="art-piece art-piece-i"><i></i><i></i><i></i><i></i></div>
+          <div class="art-stack"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ladder-panel public-notice" aria-labelledby="availability-title">
+      <h2 id="availability-title">在线天梯尚未连接</h2>
+      <p>账号、Python Bot 上传、自动配对和共享 Elo 排行榜需要独立的比赛服务，当前网站尚未接入。你可以直接体验浏览器对战、查看规则和本地回放，也可以下载 Bot 示例。</p>
+    </section>
+
+    <div class="public-grid">
+      <section class="ladder-panel" aria-labelledby="features-title">
+        <div class="panel-header">
+          <div>
+            <h2 id="features-title">现在就能体验</h2>
+            <p>对战与回放都在你的浏览器中运行。</p>
+          </div>
+        </div>
+        <div class="public-content">
+          <ul class="feature-list">
+            <li>
+              <h3>浏览器 AI 对战</h3>
+              <p>选择内置 AI 和对局种子，在双棋盘中观看对局。支持暂停、单步、调速和重新开始。</p>
+              <a href="./index.html">进入竞技场</a>
+            </li>
+            <li>
+              <h3>完整图解规则</h3>
+              <p>了解棋盘、发块、旋转、消行攻击、垃圾预警和加时，也可以查阅 Bot 通信协议。</p>
+              <a href="./rules.html">查看规则与图例</a>
+            </li>
+            <li>
+              <h3>本地 JSONL 回放</h3>
+              <p>在观战页面导入回放文件，校验并逐回合查看；也可以导出浏览器对局，留待之后分析。</p>
+              <a href="./index.html">打开观战与回放</a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="ladder-panel" aria-labelledby="downloads-title">
+        <div class="panel-header">
+          <div>
+            <h2 id="downloads-title">从一个 Bot 开始</h2>
+            <p>下载 Python 示例，阅读策略并尝试修改。</p>
+          </div>
+        </div>
+        <div class="public-content">
+          <ul class="download-list">
+            <li><a href="./examples/starter_bot.py" download><span><strong>起步 Bot</strong><small>最小通信协议示例</small></span><span class="download-action">下载 .py</span></a></li>
+            <li><a href="./examples/weak_bot.py" download><span><strong>弱基准 Bot</strong><small>基础策略示例</small></span><span class="download-action">下载 .py</span></a></li>
+            <li><a href="./examples/medium_bot.py" download><span><strong>中基准 Bot</strong><small>中档策略示例</small></span><span class="download-action">下载 .py</span></a></li>
+            <li><a href="./examples/strong_bot.py" download><span><strong>强基准 Bot</strong><small>较强搜索策略示例</small></span><span class="download-action">下载 .py</span></a></li>
+          </ul>
+          <p class="download-note">这些示例是单文件 Python 源码，运行时需要比赛服务。浏览器对局使用内置 AI，当前页面不接受源码上传。</p>
+        </div>
+      </section>
+    </div>
+
+    <footer class="ladder-footer">
+      <a href="./rules.html#protocol">查看 Bot 通信协议</a>
+    </footer>
+  </main>
+</body>
+</html>

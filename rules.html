@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d19">
+  <meta name="description" content="TETRA ARENA 双人对战完整规则，含棋盘图解、全部旋转偏移、Bot 协议和天梯计分。">
+  <title>完整对战规则 · TETRA ARENA</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./rules.css">
+  <script type="module" src="./rules.js"></script>
+</head>
+<body id="top">
+  <a class="skip-link" href="#rules-content">跳到规则正文</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="./index.html" aria-label="TETRA ARENA 竞技场">
+        <img src="./favicon.svg" width="44" height="44" alt="">
+        <span><strong lang="en">TETRA ARENA</strong><small>AI 方块竞技场</small></span>
+      </a>
+      <nav class="site-nav" aria-label="站点导航">
+        <a href="./ladder.html">天梯</a>
+        <a href="./index.html">观战</a>
+        <a href="./rules.html" aria-current="page">规则</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="hero-profile"><span>双人单挑</span><code>v0.2.0</code></p>
+        <h1>完整对战规则</h1>
+        <p>两名 Bot 每回合各落一块。用消行抵消来袭垃圾、向对手发动攻击。最后存活的一方获胜，同回合双方出局记平局。</p>
+        <div class="hero-actions">
+          <a class="action primary" href="#board">从棋盘开始 </a>
+          <a class="action secondary" href="#protocol">Bot 接入 </a>
+        </div>
+      </div>
+      <div class="hero-art" id="hero-art" aria-hidden="true"></div>
+    </header>
+    <noscript><p class="note">启用 JavaScript 后可查看棋盘图例、完整几何表和观察消息样例。</p></noscript>
+
+    <div class="rules-layout">
+      <aside class="rail">
+        <nav class="topics" aria-label="规则目录">
+          <h2>规则目录</h2>
+          <a href="#board">棋盘与发块</a>
+          <a href="#turn">回合与指令</a>
+          <a href="#attacks">消行与攻击</a>
+          <a href="#garbage">垃圾预警</a>
+          <a href="#overtime">加时与出局</a>
+          <a href="#geometry">方块与踢墙表</a>
+          <a href="#protocol">Bot 通信协议</a>
+          <a href="#ladder">天梯计分</a>
+        </nav>
+      </aside>
+
+      <div class="rules-content" id="rules-content">
+        <section class="rule-section" id="board" aria-labelledby="board-heading">
+          <div class="section-heading">
+            <h2 id="board-heading">棋盘与发块</h2>
+            <a class="section-link" href="#board" aria-label="棋盘与发块的链接">#</a>
+          </div>
+          <div class="board-layout">
+            <div class="section-body">
+              <p>棋盘为 <strong>10 列 × 24 行</strong>。从左到右为第 1～10 列，从下到上为第 1～24 行。第 1～20 行是主区，第 21～24 行是出生缓冲区。缓冲区同样能容纳已锁定的方块，双方都能看到。</p>
+              <dl class="rule-list">
+                <div><dt>独立七袋</dt><dd>每袋 I、O、T、S、Z、J、L 各一块。比赛种子和座位分别决定 A、B 的洗袋顺序。同一时刻偶尔会发到相同形状。各自取块和暂存只推进自己的序列。</dd></div>
+                <div><dt>下一块（Next 1）</dt><dd>每方可以查看自己接下来的一块。当前块和下一块之外的未来序列由裁判保管。</dd></div>
+                <div><dt>暂存（Hold）</dt><dd>每手至多一次。空暂存格收下当前块并取下一块，已有存块时直接交换。只保留形状，换入的块从固定出生位置和朝向 0 开始，并占用本手的落子机会。锁定后恢复暂存资格。</dd></div>
+              </dl>
+            </div>
+            <figure class="illustration tall-figure">
+              <div class="figure-art" id="board-figure"></div>
+              <figcaption><strong>完整棋盘与 T 块出生</strong><span>横排占第 21 行第 4～6 列，凸起占第 22 行第 5 列。</span></figcaption>
+            </figure>
+          </div>
+          <h3>每方能看到什么</h3>
+          <div class="table-scroll" role="region" aria-label="Bot 可见信息" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">信息</th><th scope="col">观察内容</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">自己的棋盘</th><td>全部 24 × 10 个已锁定格。<code>0</code> 空格、<code>1</code> 普通块、<code>2</code> 垃圾块、<code>3</code> 实心行。</td></tr>
+                <tr><th scope="row">手牌与统计</th><td>当前块、下一块、存块或 <code>null</code>、本手能否暂存、连击、背靠背、累计消行和实际发出的垃圾行。</td></tr>
+                <tr><th scope="row">来袭预警</th><td>各段垃圾的行数与到期回合。缺口列由裁判保管，升起后可从棋盘读取。</td></tr>
+                <tr><th scope="row">对手</th><td>座位编号、存活状态和完整已锁定棋盘。对手的当前块、下一块、暂存和预警均为私有信息。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">随机种子也由裁判保管。双方基于同一结算时点独立决策，单挑中所有余量攻击都自动发给唯一对手。</p>
+          <p><strong>逐回合复现。</strong>发块和垃圾缺口都由比赛种子确定，裁判结算不读取系统随机源或当前时间。使用相同规则、种子和座位对应的确定性 Bot 版本，且每手按时提交相同决策时，盘面和赛果可以逐回合重现。</p>
+        </section>
+
+        <section class="rule-section" id="turn" aria-labelledby="turn-heading">
+          <div class="section-heading">
+            <h2 id="turn-heading">回合与指令</h2>
+            <a class="section-link" href="#turn" aria-label="回合与指令的链接">#</a>
+          </div>
+          <ol class="steps">
+            <li><strong>观察与计时</strong><p>双方各获得相同且独立的思考额度，从裁判送达观察后开始计时。余时每回合重置，裁判生成和送达观察、处理回复及等待对手的时间均排除。</p></li>
+            <li><strong>可以先暂存</strong><p>单独回复 <code>HOLD</code>，交换立即生效。收到刷新观察后继续作答，前后共享本回合的思考额度。</p></li>
+            <li><strong>提交完整走法</strong><p>回复 <code>PLAY</code>，给出一串动作，唯一的 <code>HARD_DROP</code> 必须在末尾。触底后仍可横移或旋转。</p></li>
+            <li><strong>执行、锁定和计算攻击</strong><p>裁判依次执行合法动作。被墙、地板、顶边或已锁定方块挡住的动作直接跳过。硬降到底并立即锁定，随后判旋消、清行、算攻击。</p></li>
+            <li><strong>同时结算</strong><p>各自先抵消旧预警、升起到期余量，再把新攻击排入对手的预警，处理本回合的加时实心行，最后统一判胜负。提交先后不影响结算。</p></li>
+          </ol>
+          <h3>可用的走法指令</h3>
+          <div class="table-scroll" role="region" aria-label="走法指令" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">指令</th><th scope="col">动作</th></tr></thead>
+              <tbody>
+                <tr><th scope="row"><code>LEFT</code> / <code>RIGHT</code></th><td>向左 / 右移动一格。</td></tr>
+                <tr><th scope="row"><code>DOWN</code></th><td>下降一格。移动和旋转没有附带重力。</td></tr>
+                <tr><th scope="row"><code>CW</code> / <code>CCW</code></th><td>顺时针 / 逆时针转 90°，依序尝试对应偏移。</td></tr>
+                <tr><th scope="row"><code>ROT180</code></th><td>直接转 180°，使用一张独立偏移表。</td></tr>
+                <tr><th scope="row"><code>HARD_DROP</code></th><td>保持当前横坐标和朝向，下降到最低可达位置并锁定。已触底时原地锁定。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">超时或非法回复会使该方本局出局。裁判记录发生回合与原因，完整格式及错误条件见 <a href="#protocol">Bot 通信协议</a>。</p>
+        </section>
+
+        <section class="rule-section" id="attacks" aria-labelledby="attacks-heading">
+          <div class="section-heading">
+            <h2 id="attacks-heading">消行与攻击</h2>
+            <a class="section-link" href="#attacks" aria-label="消行与攻击的链接">#</a>
+          </div>
+          <p>任意一行填满且不含加时实心格时清除，上方行向下补齐。按锁定结果计算基础攻击，单位为垃圾行。</p>
+          <div class="table-scroll" role="region" aria-label="基础攻击表" tabindex="0">
+            <table class="numbers">
+              <thead><tr><th scope="col">落子结果</th><th scope="col">单消</th><th scope="col">双消</th><th scope="col">三消</th><th scope="col">四消</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">普通消行</th><td>0</td><td>1</td><td>2</td><td>4</td></tr>
+                <tr><th scope="row">完整 T 旋</th><td>2</td><td>4</td><td>6</td><td>—</td></tr>
+                <tr><th scope="row">T 旋 Mini</th><td>0</td><td>4*</td><td>6*</td><td>—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">* 满足基础 T 旋条件的双消或三消直接归为完整 T 旋。无消行的攻击为 0。</p>
+          <figure class="illustration">
+            <div class="figure-pair" id="four-figure"></div>
+            <figcaption><strong>I 块四消</strong><span>左图下方四行留出同列缺口，竖直 I 块落下后同时补满。四行清除后，上方两格降至底行，基础攻击为 4。</span></figcaption>
+          </figure>
+
+          <h3>T 旋与 Mini</h3>
+          <ol class="compact-steps">
+            <li>锁定的是 T 块，且最后一次真正改变位置或朝向的动作是旋转。</li>
+            <li>以 T 块旋转中心为基准，四个斜角至少占住三个。已有方块、侧墙和地板计为占据，单纯越过顶边的角不计。</li>
+            <li>凸起方向的两个前角都占据、消了两行或三行、最后一次 90° 旋转在第 5 个偏移才成功，三者满足任意一项即为完整 T 旋。其余通过前两项的落子为 Mini。</li>
+          </ol>
+          <p>原地硬降保留最后一次成功旋转。成功移动一格或硬降发生实际下落，会覆盖旋转记录。被挡住的指令保留原记录。直接 180° 可按前角或消行数升级，第 5 个偏移的升级条件只适用 90°。J、L 等其他形状可旋入槽中，按普通消行结算。</p>
+          <figure class="illustration">
+            <div class="figure-pair" id="spin-figure"></div>
+            <figcaption><strong>锁定后、清行前的 T 旋判定</strong><span>圆环标出前角，方框标出后角。左侧凸起向下，两个前角和一个后角被占据，完整 T 旋双消。右侧凸起向上，仅左前角与两个后角被占据，使用第 1 个 90° 偏移成功，判 Mini 单消。</span></figcaption>
+          </figure>
+
+          <h3>背靠背（B2B）与连击（Combo）</h3>
+          <p><strong>背靠背。</strong>四消或完整 T 旋消行开启 B2B。已有 B2B 时再打出其中任意一种，额外攻击 <strong>+1</strong>。普通单消、双消和三消会中断。未消行和 Mini 单消保留已有状态，两者均不领取 +1。</p>
+          <p><strong>连击。</strong>连续每手至少消一行，从第 1 手开始计数。每手最多增加一次，Mini 单消也计一次。任何未消行都会重置为 0。</p>
+          <div class="table-scroll" role="region" aria-label="连击攻击表" tabindex="0">
+            <table class="numbers">
+              <thead><tr><th scope="col">连续消行手数</th><th scope="col">1～2</th><th scope="col">3～5</th><th scope="col">6～7</th><th scope="col">8～9</th><th scope="col">10～12</th><th scope="col">≥ 13</th></tr></thead>
+              <tbody><tr><th scope="row">额外攻击</th><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr></tbody>
+            </table>
+          </div>
+
+          <h3>全消（Perfect Clear）</h3>
+          <p>清行后、升垃圾前，全部 24 行都为空即为全消。已有实心底层时，清空其上方也达不到全消。预警队列不参与检查。先加总基础攻击、B2B 和 Combo，全消时将连同奖励在内的总攻击提高到至少 <strong>10 行</strong>，再抵消旧预警。</p>
+          <figure class="illustration">
+            <div class="figure-pair" id="pc-figure"></div>
+            <figcaption><strong>O 块双消并全消</strong><span>两行中央各有两个空格，O 块补齐后棋盘清空。基础攻击 1，在无其他奖励时按 10 行抵消或发送。</span></figcaption>
+          </figure>
+        </section>
+
+        <section class="rule-section" id="garbage" aria-labelledby="garbage-heading">
+          <div class="section-heading">
+            <h2 id="garbage-heading">垃圾预警</h2>
+            <a class="section-link" href="#garbage" aria-label="垃圾预警的链接">#</a>
+          </div>
+          <p>攻击先按先入先出（FIFO）逐行抵消自己已收到的旧预警。仍有余量的旧预警若已到期，就在本回合从实心底层正上方升起。没有实心层时，插入位置是棋盘最底部。未到期的部分留在队列。</p>
+          <p>自己的攻击若有剩余，就作为新的一段进入对手预警，标记到期回合 <code>t + 1</code>。下一回合开始便可看到，对手有一手抵消。双方同一回合新发出的攻击独立入队，彼此不直接抵消。</p>
+          <figure class="illustration">
+            <div class="figure-pair" id="warning-figure"></div>
+            <figcaption><strong>3 行旧预警遇到 4 行攻击</strong><span>队列示意。A 的完整 T 旋双消（4）先抵掉 3 行旧预警，向 B 发 1 行。B 无旧预警，普通三消（2）全部发给 A。下一回合 A 看到 2 行、B 看到 1 行新预警。</span></figcaption>
+          </figure>
+          <div class="inline-example">
+            <figure class="illustration compact-figure">
+              <div class="figure-art" id="garbage-figure"></div>
+              <figcaption><strong>两段垃圾升起</strong><span>无实心底层时的局部示意。后升起的一段位于棋盘底部。</span></figcaption>
+            </figure>
+            <div>
+              <h3>每段一个缺口列</h3>
+              <p>采用 <code>mess = 0</code>、<code>gapW = 1</code>。每行有一个空格，同段各行缺口对齐。下一段由种子驱动的随机序列重新选列，有可能选到同一列。部分抵消保留该段原有缺口列。</p>
+            </div>
+          </div>
+          <figure class="illustration">
+            <div class="figure-pair" id="solid-garbage-figure"></div>
+            <figcaption><strong>新垃圾升在实心底层上方</strong><span>底部两行金色实心格保持原位。两行浅蓝色的新垃圾插入它们正上方，将原盘面连同灰色旧垃圾一起抬高两格。</span></figcaption>
+          </figure>
+        </section>
+
+        <section class="rule-section" id="overtime" aria-labelledby="overtime-heading">
+          <div class="section-heading">
+            <h2 id="overtime-heading">加时与出局</h2>
+            <a class="section-link" href="#overtime" aria-label="加时与出局的链接">#</a>
+          </div>
+          <p>前 200 回合为常规阶段。当前试玩配置于第 <strong>210</strong> 回合结算时首次增添实心行，之后每 <strong>10</strong> 回合一次（220、230、240……）。双方各在棋盘最底部加一行，实心行始终连续贴底，旧垃圾仍在实心层上方。实心行没有缺口，无法消除，也不进预警队列。</p>
+          <dl class="rule-list">
+            <div><dt>向上溢出</dt><dd>旧垃圾或加时实心行把任意已锁定格顶过第 24 行，该方出局。</dd></div>
+            <div><dt>出生受阻</dt><dd>统一结算时若下一块与已锁定格重叠，该方出局。换入的暂存块若无法出生，本手也立即停止并记该方出局。仅占据部分缓冲区、且未溢出也未挡住出生时可以继续。</dd></div>
+            <div><dt>同时出局</dt><dd>一方出局则对手获胜。同回合双方出局记为平局。若含程序失误，当前临时策略同样记平局，涵盖双方程序均失败和一方程序失败、另一方自然出局。</dd></div>
+          </dl>
+          <figure class="illustration">
+            <div class="figure-pair" id="overtime-figure"></div>
+            <figcaption><strong>实心底层与两种出局</strong><span>三个局部示意。最底部新增一行实心格，原盘面整体升高一格。原第 24 行的格子被顶出时出局。下一块的出生格与已锁定格重叠也会导致出局。</span></figcaption>
+          </figure>
+        </section>
+
+        <section class="rule-section" id="geometry" aria-labelledby="geometry-heading">
+          <div class="section-heading">
+            <h2 id="geometry-heading">方块与踢墙表</h2>
+            <a class="section-link" href="#geometry" aria-label="方块与踢墙表的链接">#</a>
+          </div>
+          <p>本节采用裁判坐标，从 <code>(0,0)</code> 起算，<code>x</code> 向右、<code>y</code> 向上。下表局部格以方块原点为基准，出生或旋转时把对应原点加到每个局部格上。朝向 <code>0</code> 为出生，顺时针依次是 <code>1</code>、<code>2</code>、<code>3</code>。</p>
+          <h3>七种方块的全部四个朝向</h3>
+          <div class="table-scroll" role="region" aria-label="方块朝向与旋转中心" tabindex="0">
+            <table class="piece-table" id="piece-table">
+              <thead><tr><th scope="col">方块 / 旋转中心</th><th scope="col">0</th><th scope="col">1</th><th scope="col">2</th><th scope="col">3</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="note">十字表示局部旋转中心。O 的四种状态占格相同，默认 90° 旋转仅尝试原位。</p>
+          <h3>出生位置与实际占格</h3>
+          <div class="table-scroll" role="region" aria-label="默认出生位置" tabindex="0">
+            <table id="spawn-table">
+              <thead><tr><th scope="col">方块</th><th scope="col">出生原点</th><th scope="col">朝向 0 的棋盘占格</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <h3>90° 有序偏移</h3>
+          <p>每个偏移 <code>(Δx, Δy)</code> 加到旋转前的方块原点，用目标朝向检查占格。按表从左到右取第一个合法位置，全部失败则原地、原朝向。</p>
+          <div class="table-scroll" role="region" aria-label="90 度旋转偏移" tabindex="0">
+            <table id="kicks-90">
+              <thead><tr><th scope="col">原 → 新</th><th scope="col">J / L / S / T / Z</th><th scope="col">I</th><th scope="col">O</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <h3>180° 有序偏移</h3>
+          <p>七种方块共用下表。一次 <code>ROT180</code> 直接检查相对朝向，独立于 90° 表。</p>
+          <div class="table-scroll" role="region" aria-label="180 度旋转偏移" tabindex="0">
+            <table id="kicks-180">
+              <thead><tr><th scope="col">原 → 新</th><th scope="col">1</th><th scope="col">2</th><th scope="col">3</th><th scope="col">4</th><th scope="col">5</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="note">几何表由与网页裁判共用的默认配置生成。实际对局以 <code>OBSERVE.observation.geometry</code> 和 <code>rules.spawn_origins</code> 为准。</p>
+        </section>
+
+        <section class="rule-section" id="protocol" aria-labelledby="protocol-heading">
+          <div class="section-heading">
+            <h2 id="protocol-heading">Bot 通信协议</h2>
+            <a class="section-link" href="#protocol" aria-label="Bot 通信协议的链接">#</a>
+          </div>
+          <div class="starter">
+            <p><strong>下载 Python 示例 Bot</strong><span>起步示例与弱、中、强三个档位均可直接上传天梯。</span></p>
+            <a class="action primary" href="./examples/starter_bot.py" download>起步 Bot</a>
+            <a class="action secondary" href="./examples/weak_bot.py" download>弱基准 Bot</a>
+            <a class="action secondary" href="./examples/medium_bot.py" download>中基准 Bot</a>
+            <a class="action secondary" href="./examples/strong_bot.py" download>强基准 Bot</a>
+          </div>
+          <p><code>tetris-duel-jsonl-v1</code> 用 UTF-8 JSONL 通过标准输入输出通信。每条消息恰好一个 JSON 对象，以换行结尾。读到 <code>OBSERVE</code> 后，用同一个字符串 <code>request_id</code> 回复一次，输出后立即刷新。标准输出留给协议消息，调试信息可写标准错误。</p>
+          <div class="table-scroll" role="region" aria-label="观察消息字段" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">字段</th><th scope="col">含义</th></tr></thead>
+              <tbody>
+                <tr><th scope="row"><code>type</code> / <code>request_id</code></th><td>请求类型固定为 <code>OBSERVE</code>，ID 为每个 Bot 进程独立递增的字符串。</td></tr>
+                <tr><th scope="row"><code>remaining_ms</code></th><td>当前回合剩余毫秒数，向下取整。</td></tr>
+                <tr><th scope="row"><code>observation</code></th><td>含 <code>protocol</code>、从 1 开始的 <code>turn</code>、座位 <code>you</code>（0 或 1）、<code>rules</code>、规则指纹 <code>rules_sha256</code>、<code>geometry</code>、<code>self</code> 和 <code>opponent</code>。</td></tr>
+                <tr><th scope="row"><code>self</code></th><td><code>board</code>、<code>current</code>、<code>next</code>、<code>hold</code>、<code>can_hold</code>、<code>warnings</code>（各段含 <code>lines</code>、<code>due</code>）、<code>combo</code>、<code>b2b</code>、<code>total_lines</code>、<code>total_sent</code>。</td></tr>
+                <tr><th scope="row"><code>opponent</code></th><td><code>id</code>、<code>alive</code>、<code>board</code>。双方棋盘都按从下到上的行序、从左到右的列序表示，使用 <code>board[y][x]</code> 访问。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>一次含暂存的通信</h3>
+          <ol class="protocol-steps">
+            <li>
+              <details class="message">
+                <summary>裁判 → Bot · 首次 <code>OBSERVE</code></summary>
+                <p class="note">以下为完整的单行 JSON。横向滚动可查看全部字段。</p>
+                <pre tabindex="0"><code id="observe-example">正在生成默认观察…</code></pre>
+              </details>
+            </li>
+            <li>
+              <div class="message">
+                <p class="message-heading">Bot → 裁判 · <code>HOLD</code></p>
+                <pre tabindex="0"><code>{"type":"HOLD","request_id":"1"}</code></pre>
+              </div>
+            </li>
+            <li>
+              <details class="message">
+                <summary>裁判 → Bot · 刷新 <code>OBSERVE</code></summary>
+                <p class="note">观察仍在第 1 回合。两条观察的思考额度共享，此处示例剩余 860 ms，且 <code>self.can_hold</code> 已为 <code>false</code>。</p>
+                <pre tabindex="0"><code id="observe-after-hold">正在生成暂存后观察…</code></pre>
+              </details>
+            </li>
+            <li>
+              <div class="message">
+                <p class="message-heading">Bot → 裁判 · <code>PLAY</code></p>
+                <pre tabindex="0"><code>{"type":"PLAY","request_id":"2","commands":["LEFT","CW","HARD_DROP"]}</code></pre>
+              </div>
+            </li>
+          </ol>
+          <p>也可直接回复 <code>PLAY</code>，使用首次观察的 ID。<code>HOLD</code> 只接受 <code>type</code> 和 <code>request_id</code>，<code>PLAY</code> 还需 <code>commands</code>。两种回复都拒绝额外字段。</p>
+
+          <h3>程序失误与当前裁判配置</h3>
+          <p>超时、进程退出或未提供回复、空行、无结尾换行、无效 UTF-8 或 JSON、非对象、重复键、<code>NaN</code> / <code>Infinity</code> / <code>-Infinity</code>、过期或错误 ID、未知类型或多余字段均为程序失误。重复 <code>HOLD</code>、空走法、未知指令、超过长度限制，以及缺失末尾硬降或提前硬降同样判失误。</p>
+          <div class="table-scroll" role="region" aria-label="确认规则及临时配置" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">状态</th><th scope="col">范围</th><th scope="col">规则或当前值</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">已确认</th><td>单挑规则</td><td>棋盘、独立七袋、单手暂存、同步结算、旋消、攻击、垃圾预警、实心底层与出局机制。</td></tr>
+                <tr><th scope="row">已确认</th><td>T 块出生</td><td>第 21 行第 4～6 列与第 22 行第 5 列。</td></tr>
+                <tr><th scope="row">试玩值</th><td>加时安排</td><td>第 <strong>210</strong> 回合结束首次升起，之后每 <strong>10</strong> 回合一行。</td></tr>
+                <tr><th scope="row">临时配置</th><td>每手思考时间</td><td><strong>1000 ms</strong>，暂存前后共用。</td></tr>
+                <tr><th scope="row">临时配置</th><td>走法 / 输出上限</td><td><strong>512</strong> 条指令（含硬降），每条回复最多 <strong>65,536</strong> 字节（含换行）。</td></tr>
+                <tr><th scope="row">临时配置</th><td>几何与通信</td><td>完整出生表、朝向与旋转中心、90° / 180° 偏移、JSONL 字段和指令拼写以默认配置为准。</td></tr>
+                <tr><th scope="row">临时配置</th><td>含程序失误的同时出局</td><td><code>draw</code>（平局）。</td></tr>
+                <tr><th scope="row">待定</th><td>3～4 人模式</td><td>未实现。目标选择、集火、反击与淘汰奖励待议。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">新对局使用裁判 0.2.0 的默认配置 <code>reference-provisional-v2</code>。参赛程序可通过每局公开的配置、几何和规则指纹确认所用规则。历史 0.1.0 / <code>reference-provisional-v1</code> 回放按旧规则重算。</p>
+        </section>
+
+        <section class="rule-section" id="ladder" aria-labelledby="ladder-heading">
+          <div class="section-heading">
+            <h2 id="ladder-heading">天梯计分</h2>
+            <a class="section-link" href="#ladder" aria-label="天梯计分的链接">#</a>
+          </div>
+          <p>每个 Bot 版本独立排名，初始 Elo 为 <strong>1000</strong>，首个有效挑战结算前显示未定级。上传新版本时该版本重新从 1000 分起算。</p>
+          <ol class="steps">
+            <li><strong>一组挑战打两局</strong><p>两局使用同一个比赛种子，第二局交换 A、B 座，让每个 Bot 分别使用两座的发块序列。单局胜得 1、平得 0.5、负得 0。</p></li>
+            <li><strong>取两局平均得分</strong><p>例如一胜一平得到 <code>S = (1 + 0.5) / 2 = 0.75</code>。</p></li>
+            <li><strong>更新一次 Elo</strong><p>A 的预期得分为 <code>E = 1 / (1 + 10^((Rᴮ − Rᴬ) / 400))</code>。A 的分数变化为 <code>Δ = 32 × (S − E)</code>，四舍五入至两位小数，B 的变化为 <code>−Δ</code>。</p></li>
+          </ol>
+          <p>单局程序失误由裁判按对战规则计入结果。挑战中断或发生基础设施故障时，整组挑战不计分。</p>
+          <a class="action secondary" href="./ladder.html">前往天梯 <span aria-hidden="true">→</span></a>
+        </section>
+
+        <footer class="page-footer">
+          <span>TETRA ARENA</span>
+          <a href="#top">返回顶部 ↑</a>
+        </footer>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
