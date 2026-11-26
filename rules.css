@@ -365,6 +365,8 @@ tbody tr:last-child > * { border-bottom: 0; }
 }
 .figure-art > svg { display: block; width: 100%; max-width: 285px; height: auto; }
 .figure-pair > svg { display: block; width: min(100%, 530px); height: auto; }
+.spin-guide-link { display: block; }
+.spin-guide { display: block; width: min(100%, 760px); height: auto; margin-inline: auto; }
 .tall-figure .figure-art { padding: 14px 10px 6px; }
 .tall-figure .figure-art > svg { max-width: 248px; }
 figcaption { display: grid; gap: 3px; padding: 11px 14px 13px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }

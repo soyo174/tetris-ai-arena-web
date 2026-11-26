@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
   <meta name="tetra-api-base" content="https://129.204.38.227/tetra-arena/">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070b14">
   <meta name="description" content="观看天梯 Bot 的真实比赛回放，或配置基准 AI 逐回合对战。">
@@ -78,12 +78,14 @@
             <div class="player-title">
               <h2 id="player-heading-a">选手 A</h2>
               <p class="player-bot" id="bot-name-a">—</p>
+              <p class="player-pace" id="pace-a"></p>
             </div>
             <span class="player-state" id="player-state-a"></span>
           </header>
           <div class="player-field">
             <div class="board-frame">
               <canvas id="board-a" width="300" height="720" role="img" aria-label="选手 A 的棋盘，10 列 24 行">选手 A 的棋盘</canvas>
+              <button type="button" class="board-spin" id="spin-a" hidden></button>
             </div>
             <div class="player-previews">
               <div class="preview preview-current">
@@ -93,6 +95,7 @@
               <div class="preview">
                 <p>下一块</p>
                 <canvas id="next-a" width="120" height="64" role="img" aria-label="选手 A 的下一块">下一块</canvas>
+                <div class="next-queue" id="queue-a" aria-label="选手 A 后续预览" hidden></div>
               </div>
               <div class="preview">
                 <p>暂存</p>
@@ -116,7 +119,7 @@
           <div class="match-summary">
             <p class="match-status" id="match-status" role="status">载入中</p>
             <p class="round">
-              <span class="round-label">TURN</span>
+              <span class="round-label" id="round-label">TIME</span>
               <span class="round-number" id="turn">—</span>
             </p>
             <p class="match-detail" id="match-detail"></p>
@@ -173,12 +176,14 @@
             <div class="player-title">
               <h2 id="player-heading-b">选手 B</h2>
               <p class="player-bot" id="bot-name-b">—</p>
+              <p class="player-pace" id="pace-b"></p>
             </div>
             <span class="player-state" id="player-state-b"></span>
           </header>
           <div class="player-field">
             <div class="board-frame">
               <canvas id="board-b" width="300" height="720" role="img" aria-label="选手 B 的棋盘，10 列 24 行">选手 B 的棋盘</canvas>
+              <button type="button" class="board-spin" id="spin-b" hidden></button>
             </div>
             <div class="player-previews">
               <div class="preview preview-current">
@@ -188,6 +193,7 @@
               <div class="preview">
                 <p>下一块</p>
                 <canvas id="next-b" width="120" height="64" role="img" aria-label="选手 B 的下一块">下一块</canvas>
+                <div class="next-queue" id="queue-b" aria-label="选手 B 后续预览" hidden></div>
               </div>
               <div class="preview">
                 <p>暂存</p>
@@ -300,10 +306,10 @@
       </form>
     </div>
     <div class="rules-content">
-      <p>双方 AI 每回合各落定一块，裁判同时结算。只有一方出局时，对手获胜。双方在同一回合出局时，判为平局。</p>
+      <p>双方 AI 在 60 FPS 虚拟时钟下异步落块，不设同步回合。一方出局时对手获胜；同一帧双方自然出局或满 180 秒时长上限判平局。</p>
 
       <h3>棋盘与发块</h3>
-      <p>棋盘有 10 列 24 行，上方 4 行是出生缓冲区。双方各用一条由种子和座位确定的独立七袋序列，每袋包含七种方块。每回合可以暂存或交换一次方块，并能预览自己的下一块。</p>
+      <p>棋盘有 10 列 24 行，上方 4 行是出生缓冲区。双方各用一条由种子和座位确定的独立七袋序列，每袋包含七种方块。每手可以暂存或交换一次方块，并预览接下来的 5 个方块（Next 5）。</p>
 
       <h3>消行与攻击</h3>
       <div class="rules-table">
@@ -318,13 +324,15 @@
       </div>
       <p>四消或完整 T 旋消行可开启背靠背，后续再达成时攻击加 1。连击从连续消行的第 3 手开始增加攻击。全消时攻击至少为 10 行。</p>
 
-      <h3>垃圾行与加时</h3>
-      <p>本回合的攻击先抵消自己的旧预警，余量随后发给对手。对手下一回合看到预警，有一手可以抵消。未被抵消的到期垃圾升在实心底层上方，没有实心层时从棋盘底部升起。</p>
-      <p>第 210 回合结束时首次加时，之后每 10 回合双方各在棋盘最底部增加一行实心行。实心层始终连续贴底。已锁定的方块被顶出棋盘，或下一块无法出生时，该方出局。</p>
+      <h3>无回合 60 FPS 异步时钟</h3>
+      <p>新赛制采用 60 FPS 虚拟逻辑时钟，取消同步回合：移动 2 帧、旋转 1 帧、软降 2 帧/格、Hold 2 帧、硬降锁定 8 帧，普通消行 +12 帧、四消或完整 T 旋 +16 帧。思考从开始按 60 FPS 累积折帧，单手最多 6 帧，不足一帧的余量留到下一手。谁的落块先到达锁定帧，谁就先结算并继续行动。</p>
+
+      <h3>垃圾行、有限连消阻断与加时</h3>
+      <p>攻击发出后延迟 30 帧（0.5 秒）到期。连消期间可暂缓到期垃圾升起（单次连消最多连续阻断 3 手，防止 4-Wide 无限赖皮）；断连或达上限后每手最多升起 8 行（超出顺延），段内 25% 乱度、双方垃圾流独立。同帧交锋的新攻击先互相交叉抵消。</p>
+      <p>满 60 秒（3600 帧）首次加时，之后每 4 秒（240 帧）双方各增 1 行实心行，单局上限 180 秒（10800 帧）。同帧单方程序违规、另一方合法出局时判合法方获胜。</p>
 
       <h3>网页与回放</h3>
-      <p>网页内运行贪心、随机和硬降三种基准 AI。你也可以把本地裁判生成的 JSONL 回放导入网页观看。</p>
-      <p>新对局使用裁判 v0.3.0 默认规则 reference-provisional-v3。v0.1.0 和 v0.2.0 回放按对应规则重算。整数种子范围为 ±9007199254740991，手工导入上限为 8 MiB、2000 回合。未结束的对局可以导出为阶段回放。</p>
+      <p>新对局使用裁判 v0.5.3 实时规则 <code>reference-realtime-v5.3</code>（首手 1000 ms，后续每手 100 ms + 2000 ms 共享时间池），并完整兼容重算 v0.1.0 至 v0.5.2 的历史回放。</p>
     </div>
     <div class="dialog-actions">
       <a class="button button-quiet" href="./rules.html">查看完整图文规则 →</a>

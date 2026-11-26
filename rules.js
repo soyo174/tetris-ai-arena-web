@@ -1,4 +1,5 @@
 import { createDuel, DEFAULT_RULES, geometry } from './engine.mjs';
+import './api.mjs';
 
 const { cells, pivots, kicks_90: kicks90, kicks_180: kicks180 } = geometry();
 const pieces = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
@@ -50,16 +51,10 @@ function board({ x, y, rows, size, base = 0, blocks = [], shadeRows = 0, markers
   return grid(x, y, DEFAULT_RULES.width, rows, size, shadeRows) +
     blocks.map(([column, row, type = 'normal', outline]) =>
       block(...coords(column, row), size, type, outline)).join('') +
-    markers.map(([column, row, type]) => {
+    markers.map(([column, row]) => {
       const [left, top] = coords(column, row);
       const centerX = left + size / 2;
       const centerY = top + size / 2;
-      if (type === 'front') {
-        return `<circle cx="${centerX}" cy="${centerY}" r="${size * .32}" fill="none" stroke="#fde68a" stroke-width="2"/>`;
-      }
-      if (type === 'rear') {
-        return `<rect x="${left + size * .22}" y="${top + size * .22}" width="${size * .56}" height="${size * .56}" rx="1" fill="none" stroke="#bae6fd" stroke-width="2"/>`;
-      }
       return `<path d="M${centerX - 4} ${centerY - 4}l8 8m-8 0 8-8" stroke="#fecdd3" stroke-width="2" stroke-linecap="round"/>`;
     }).join('');
 }
@@ -122,26 +117,6 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
 }
 
 {
-  const outer = line(1, x => x < 3 || x > 5);
-  const fullRows = [...outer, ...line(0, x => x !== 4), [3, 2]];
-  const miniRows = [...outer, [3, 0], [5, 0], [3, 2]];
-  const left = board({
-    x: 14, y: 36, rows: 4, size: 20,
-    blocks: [...fullRows, ...colored(translated(cells.T[2], [3, 0]), 'T')],
-    markers: [[3, 0, 'front'], [5, 0, 'front'], [3, 2, 'rear'], [5, 2, 'rear']]
-  });
-  const right = board({
-    x: 246, y: 36, rows: 4, size: 20,
-    blocks: [...miniRows, ...colored(translated(cells.T[0], [3, 0]), 'T')],
-    markers: [[3, 2, 'front'], [5, 2, 'front'], [3, 0, 'rear'], [5, 0, 'rear']]
-  });
-  figure('spin-figure', 460, 134, left + right +
-    text(114, 23, '完整 T 旋 · 双消', 17, '#e5d8ff') +
-    text(346, 23, 'Mini · 单消', 17, '#e5d8ff'),
-    '左侧 T 向下，两个前角和左后角有方块，完成完整 T 旋双消。右侧 T 向上，左前角和两个后角有方块，右前角为空，完成 Mini 单消。');
-}
-
-{
   const filled = [0, 1].flatMap(y => line(y, x => x !== 4 && x !== 5));
   const square = colored(translated(cells.O[0], [3, -1]), 'O');
   comparison('pc-figure', { blocks: [...filled, ...square] }, {},
@@ -158,10 +133,10 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
       text(x + 13, 66 + i * 33, label, 15, '#b8cbe7', 'start') +
       bars(x + 111, 50 + i * 33, count, type, faded)).join('');
   figure('warning-figure', 482, 160,
-    pane(6, '本回合 · A', [['旧预警 3', 3, 'cancelled'], ['打出 4', 4, 'T', 3], ['向 B 发 1', 1, 'T']]) +
-    pane(256, '下一回合预警', [['A 收到 2', 2, 'J'], ['B 收到 1', 1, 'T']]) +
+    pane(6, '同帧锁定 · 对冲前', [['A 抵旧 3', 3, 'cancelled'], ['A 剩 1', 1, 'T'], ['B 剩 2', 2, 'J']]) +
+    pane(256, '交叉抵消后', [['双方抵 1', 1, 'cancelled'], ['B 净发 1', 1, 'J']]) +
     text(241, 92, '→', 22, '#5ed0ff'),
-    '队列示意。A 的四行攻击中三行抵消旧预警，一行发送给 B。B 发送两行给 A，下一回合 A 看到两行预警，B 看到一行。');
+    'A 先抵消自己的三行旧预警，余一行。B 有两行新攻击。双方同帧锁定，各抵一行，B 向 A 净发一行。');
 }
 
 {
@@ -190,10 +165,10 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
     blocks: [...colored([...line(0), ...line(1)], 'solid'),
       ...colored(line(2, x => x !== 7), 'garbage'), [1, 3], [2, 3]] });
   const overflow = board({ x: 184, y: 37, rows: 5, size: 15, base: 20,
-    blocks: [[0, 24, 'overflow', true]], markers: [[0, 24, 'collision']] });
+    blocks: [[0, 24, 'overflow', true]], markers: [[0, 24]] });
   const spawn = colored(translated(cells.T[0], DEFAULT_RULES.spawn_origins.T), 'T', true);
   const blocked = board({ x: 360, y: 52, rows: 4, size: 15, base: 20, shadeRows: 4,
-    blocks: [[4, 21], ...spawn], markers: [[4, 21, 'collision']] });
+    blocks: [[4, 21], ...spawn], markers: [[4, 21]] });
   figure('overtime-figure', 518, 140, solid + overflow + blocked +
     '<path d="M184 52h150" stroke="#fda4af" stroke-width="2" stroke-dasharray="4 3"/>' +
     text(83, 26, '实心底层 +1', 18, '#fde68a') +
@@ -230,8 +205,10 @@ function geometryRows() {
     return `<tr><th scope="row">${key.replace(':', ' → ')}</th>${offsets}</tr>`;
   });
   const half = [0, 1, 2, 3].map(old => {
-    const offsets = kicks180.map(offset => `<td><code>${pair(offset)}</code></td>`).join('');
-    return `<tr><th scope="row">${old} → ${(old + 2) % 4}</th>${offsets}</tr>`;
+    const next = (old + 2) % 4;
+    const list = Array.isArray(kicks180) ? kicks180 : kicks180[`${old}:${next}`];
+    const offsets = list.map(offset => `<td><code>${pair(offset)}</code></td>`).join('');
+    return `<tr><th scope="row">${old} → ${next}</th>${offsets}</tr>`;
   });
 
   for (const [id, rows] of [['piece-table', orientations], ['spawn-table', spawns], ['kicks-90', ninety], ['kicks-180', half]]) {
@@ -298,12 +275,15 @@ for (const pre of document.querySelectorAll('.message pre')) {
 async function showObservations() {
   try {
     const duel = await createDuel(0);
+    const bankMs = duel.rules.time_bank_ms;
+    const firstBudgetMs = duel.rules.first_think_ms + bankMs;
+    const holdExampleMs = 140;
     const observationLine = (requestId, remainingMs) => JSON.stringify({
-      type: 'OBSERVE', request_id: requestId, remaining_ms: remainingMs, observation: duel.observe(0)
+      type: 'OBSERVE', request_id: requestId, remaining_ms: remainingMs, bank_ms: bankMs, observation: duel.observe(0)
     }) + '\n';
-    byId('observe-example').textContent = observationLine('1', DEFAULT_RULES.first_think_ms);
+    byId('observe-example').textContent = observationLine('1', firstBudgetMs);
     duel.hold(0);
-    byId('observe-after-hold').textContent = observationLine('2', 860);
+    byId('observe-after-hold').textContent = observationLine('2', firstBudgetMs - holdExampleMs);
   } catch {
     byId('observe-example').textContent = '无法生成样例。请通过 HTTPS 或 localhost 打开页面。';
     byId('observe-after-hold').textContent = '无法生成样例。请通过 HTTPS 或 localhost 打开页面。';

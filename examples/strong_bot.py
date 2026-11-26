@@ -21,11 +21,11 @@ class SearchTimeout(Exception):
 
 
 class Model:
-    def __init__(self, observation, deadline=None):
+    def __init__(self, observation, deadline=None, *, rules=None, geometry=None):
         self.observation = observation
         self.deadline = deadline
-        self.rules = observation['rules']
-        geometry = observation['geometry']
+        self.rules = observation.get('rules') or rules
+        geometry = observation.get('geometry') or geometry
         self.cells = {p: tuple(tuple(tuple(c) for c in rotation) for rotation in values)
                       for p, values in geometry['cells'].items()}
         self.kicks90 = geometry['kicks_90']
@@ -83,7 +83,10 @@ class Model:
                 return (x + dx, y + dy, r, 0) if fits(x + dx, y + dy, r) else pose
             delta = {'CW': 1, 'CCW': -1, 'ROT180': 2}[command]
             nr = (r + delta) % 4
-            offsets = self.kicks180 if delta == 2 else self.kicks90[piece][f'{r}:{nr}']
+            if delta == 2:
+                offsets = self.kicks180[f'{r}:{nr}'] if isinstance(self.kicks180, dict) else self.kicks180
+            else:
+                offsets = self.kicks90[piece][f'{r}:{nr}']
             for index, (dx, dy) in enumerate(offsets, 1):
                 if fits(x + dx, y + dy, nr):
                     flag = (2 if delta != 2 and index == 5 else 1) if piece == 'T' else 0
@@ -236,7 +239,11 @@ class Model:
         Mandatory spawn feasibility above those rows is exact; when an unknown
         current is involved we count all seven public spawn shapes conservatively.
         """
-        turn = self.observation['turn'] if turn is None else turn
+        is_rt = 'overtime_first_frame' in self.rules
+        if turn is None:
+            now_tick = self.observation['frame'] if is_rt else self.observation['turn']
+        else:
+            now_tick = turn
         warnings = self.observation['self']['warnings'] if warnings is None else warnings
         rows, solids = placement.rows, placement.solids
         future, due = [], []
@@ -246,22 +253,38 @@ class Model:
             attack -= used
             left = lines - used
             if left:
-                if deadline <= turn:
+                if deadline <= now_tick:
                     due.append(left)
                 else:
                     future.append((left, deadline))
         overflow = False
+        cap = self.rules.get('garbage_cap')
+        budget = cap
+        deferred = []
         for count in due:
-            floor = 0
-            while floor < 24 and solids[floor] is True and rows[floor] == FULL:
-                floor += 1
-            capacity = 24 - floor
-            retained = max(0, capacity - count)
-            overflow |= count > capacity or any(rows[floor + retained:])
-            inserted = min(count, capacity)
-            rows = rows[:floor] + (FULL,) * inserted + rows[floor:floor + retained]
-            solids = solids[:floor] + (2,) * inserted + solids[floor:floor + retained]
-        if turn >= self.rules['overtime_first'] and (turn - self.rules['overtime_first']) % self.rules['overtime_interval'] == 0:
+            take = count if budget is None else min(count, budget)
+            if budget is not None:
+                budget -= take
+            if take > 0:
+                floor = 0
+                while floor < 24 and solids[floor] is True and rows[floor] == FULL:
+                    floor += 1
+                capacity = 24 - floor
+                retained = max(0, capacity - take)
+                overflow |= take > capacity or any(rows[floor + retained:])
+                inserted = min(take, capacity)
+                rows = rows[:floor] + (FULL,) * inserted + rows[floor:floor + retained]
+                solids = solids[:floor] + (2,) * inserted + solids[floor:floor + retained]
+            if count > take:
+                deferred.append((count - take, now_tick + 1))
+        future = deferred + future
+        if is_rt:
+            overtime_due = (now_tick >= self.rules['overtime_first_frame']
+                            and (now_tick - self.rules['overtime_first_frame']) % self.rules['overtime_interval_frames'] == 0)
+        else:
+            overtime_due = (now_tick >= self.rules['overtime_first']
+                            and (now_tick - self.rules['overtime_first']) % self.rules['overtime_interval'] == 0)
+        if overtime_due:
             overflow |= bool(rows[-1])
             rows = (FULL,) + rows[:23]
             solids = (True,) + solids[:23]
@@ -328,7 +351,9 @@ class Model:
 
     def plan(self):
         own = self.observation['self']
-        turn = self.observation['turn']
+        is_rt = 'overtime_first_frame' in self.rules
+        step_inc = 15 if is_rt else 1
+        now_tick = self.observation['frame'] if is_rt else self.observation['turn']
         branches = [(own['current'], False, own['next'], own['hold'])]
         if own['can_hold']:
             alternative = own['hold'] if own['hold'] is not None else own['next']
@@ -348,7 +373,7 @@ class Model:
             best_value = None
             for candidate in roots:
                 children = self.second_choices(candidate.forecast, candidate.next_piece, candidate.hold,
-                                               candidate.combo, candidate.b2b, turn + 1)
+                                               candidate.combo, candidate.b2b, now_tick + step_inc)
                 value = children[0].value + candidate.reward if children else candidate.value - 10**10
                 preliminary.append((value, candidate))
                 if best_value is None or value > best_value:
@@ -357,10 +382,10 @@ class Model:
             best_score = None
             for _, candidate in preliminary[:3]:
                 children = self.second_choices(candidate.forecast, candidate.next_piece, candidate.hold,
-                                               candidate.combo, candidate.b2b, turn + 1, full=True)
+                                               candidate.combo, candidate.b2b, now_tick + step_inc, full=True)
                 value = candidate.value - 10**10
                 for child in children[:4]:
-                    score = self.tail_value(child, turn + 2) + candidate.reward + 3 * child.reward // 4
+                    score = self.tail_value(child, now_tick + 2 * step_inc) + candidate.reward + 3 * child.reward // 4
                     value = max(value, score)
                 # On equal values prefer keeping Hold; route order stays stable.
                 selection = value, not candidate.held
@@ -377,25 +402,40 @@ class Model:
         return kind, commands if kind == 'PLAY' else None
 
 
+_STATIC_CACHE = {}
+
+
 def decide(observation):
-    return Model(observation).choose()
+    key = observation.get('rules_sha256')
+    if 'rules' in observation and 'geometry' in observation:
+        _STATIC_CACHE[key] = (observation['rules'], observation['geometry'])
+    rules, geometry = _STATIC_CACHE.get(key, (None, None))
+    return Model(observation, rules=rules, geometry=geometry).choose()
 
 
 def serve():
     after_hold = None
+    cached_rules = None
+    cached_geometry = None
     for line in sys.stdin:
         started = perf_counter()
         request = json.loads(line)
         observation = request['observation']
+        if 'rules' in observation:
+            cached_rules = observation['rules']
+        if 'geometry' in observation:
+            cached_geometry = observation['geometry']
         own = observation['self']
         turn = observation['turn']
         if after_hold and after_hold[:2] == (turn, own['current']) and not own['can_hold']:
             kind, commands = 'PLAY', after_hold[2]
         else:
             remaining = request.get('remaining_ms')
+            bank = request.get('bank_ms')
+            budget = remaining if bank is None else min(remaining, max(0, remaining - bank) + min(bank, 100))
             # Reserve time for the protocol, scheduling and the PLAY after HOLD.
-            deadline = started + max(0, remaining - 12) / 1000 if type(remaining) is int else None
-            kind, commands = Model(observation, deadline).plan()
+            deadline = started + max(0, budget - 12) / 1000 if type(budget) is int else None
+            kind, commands = Model(observation, deadline, rules=cached_rules, geometry=cached_geometry).plan()
         after_hold = (turn, own['hold'] or own['next'], commands) if kind == 'HOLD' else None
         response = {'type': kind, 'request_id': request['request_id']}
         if kind == 'PLAY':

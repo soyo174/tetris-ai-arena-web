@@ -22,11 +22,11 @@ def one_ply(options):
 
 
 class Model:
-    def __init__(self, observation, deadline=None):
+    def __init__(self, observation, deadline=None, *, rules=None, geometry=None):
         self.observation = observation
         self.deadline = deadline
-        self.rules = observation['rules']
-        geometry = observation['geometry']
+        self.rules = observation.get('rules') or rules
+        geometry = observation.get('geometry') or geometry
         self.cells = {p: tuple(tuple(tuple(c) for c in rotation) for rotation in values)
                       for p, values in geometry['cells'].items()}
         self.kicks90 = geometry['kicks_90']
@@ -61,7 +61,10 @@ class Model:
                 return (x + dx, y + dy, r, 0) if fits(x + dx, y + dy, r) else pose
             delta = {'CW': 1, 'CCW': -1, 'ROT180': 2}[command]
             nr = (r + delta) % 4
-            offsets = self.kicks180 if delta == 2 else self.kicks90[piece][f'{r}:{nr}']
+            if delta == 2:
+                offsets = self.kicks180[f'{r}:{nr}'] if isinstance(self.kicks180, dict) else self.kicks180
+            else:
+                offsets = self.kicks90[piece][f'{r}:{nr}']
             for index, (dx, dy) in enumerate(offsets, 1):
                 if fits(x + dx, y + dy, nr):
                     flag = (2 if delta != 2 and index == 5 else 1) if piece == 'T' else 0
@@ -199,14 +202,18 @@ class Model:
 
     def imminent_cost(self, placement, attack):
         due = 0
-        turn = self.observation['turn']
+        now_tick = self.observation.get('frame', self.observation['turn'])
         for warning in self.observation['self']['warnings']:
             remaining = max(0, warning['lines'] - attack)
             attack = max(0, attack - warning['lines'])
-            if warning['due'] <= turn:
+            if warning['due'] <= now_tick:
                 due += remaining
-        overtime = (turn >= self.rules['overtime_first'] and
-                    (turn - self.rules['overtime_first']) % self.rules['overtime_interval'] == 0)
+        if 'overtime_first_frame' in self.rules:
+            overtime = (now_tick >= self.rules['overtime_first_frame'] and
+                        (now_tick - self.rules['overtime_first_frame']) % self.rules['overtime_interval_frames'] < 20)
+        else:
+            overtime = (now_tick >= self.rules['overtime_first'] and
+                        (now_tick - self.rules['overtime_first']) % self.rules['overtime_interval'] == 0)
         peak = max((y + 1 for y, row in enumerate(placement.rows) if row), default=0)
         return 220 * max(0, peak + due + overtime - 18) ** 2 + 25 * due
 
@@ -277,26 +284,41 @@ class Model:
         return best
 
 
+_STATIC_CACHE = {}
+
+
 def decide(observation):
-    kind, commands = Model(observation).plan()
+    key = observation.get('rules_sha256')
+    if 'rules' in observation and 'geometry' in observation:
+        _STATIC_CACHE[key] = (observation['rules'], observation['geometry'])
+    rules, geometry = _STATIC_CACHE.get(key, (None, None))
+    kind, commands = Model(observation, rules=rules, geometry=geometry).plan()
     return kind, commands if kind == 'PLAY' else None
 
 
 def serve():
     after_hold = None
+    cached_rules = None
+    cached_geometry = None
     for line in sys.stdin:
         started = perf_counter()
         request = json.loads(line)
         observation = request['observation']
+        if 'rules' in observation:
+            cached_rules = observation['rules']
+        if 'geometry' in observation:
+            cached_geometry = observation['geometry']
         own = observation['self']
         turn = observation['turn']
         if after_hold and after_hold[:2] == (turn, own['current']) and not own['can_hold']:
             kind, commands = 'PLAY', after_hold[2]
         else:
             remaining = request.get('remaining_ms')
+            bank = request.get('bank_ms')
+            budget = remaining if bank is None else min(remaining, max(0, remaining - bank) + min(bank, 100))
             # Reserve time for the protocol, scheduling and the PLAY after HOLD.
-            deadline = started + max(0, remaining - 12) / 1000 if type(remaining) is int else None
-            kind, commands = Model(observation, deadline).plan()
+            deadline = started + max(0, budget - 12) / 1000 if type(budget) is int else None
+            kind, commands = Model(observation, deadline, rules=cached_rules, geometry=cached_geometry).plan()
         after_hold = (turn, own['hold'] or own['next'], commands) if kind == 'HOLD' else None
         response = {'type': kind, 'request_id': request['request_id']}
         if kind == 'PLAY':

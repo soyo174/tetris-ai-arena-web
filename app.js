@@ -1,4 +1,4 @@
-import {createDuel, PythonRandom, CELLS} from './engine.mjs';
+import {createDuel, PythonRandom, CELLS, traceTSpin} from './engine.mjs';
 import {apiFetch} from './api.mjs';
 import {createHeader, makeFrame, playOfficialReplay, playTurn, serializeReplay, summarize, validateReplay, replayBotModes, MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES} from './replay.mjs';
 
@@ -18,6 +18,9 @@ const COLORS = {
 };
 let session = null, viewIndex = 0, running = false, timer = null, busy = true, generation = 0;
 let activeOfficialId = null;
+let displayedFrame = null, spinAnimation = 0;
+const SPIN_DURATION = 340;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 function feedback(text = '', error = false) {
   const node = $('match-message');
@@ -142,9 +145,11 @@ function drawMini(id, piece) {
   canvas.setAttribute('aria-label', `${piece} 方块`);
 }
 
-function drawBoard(side, frame) {
+function drawBoard(side, frame, spin = null) {
   const letter = side ? 'b' : 'a', canvas = $(`board-${letter}`), ctx = canvas.getContext('2d');
-  const cell = canvas.width / 10, rows = frame.state.players[side].board, obs = frame.observations[side];
+  const cell = canvas.width / 10, obs = frame.observations[side];
+  const rows = spin?.trace.rows ?? frame.state.players[side].board;
+  const colors = spin?.colors ?? frame.colors[side];
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // Subtle vertical background depth
@@ -177,7 +182,7 @@ function drawBoard(side, frame) {
   // Highlight cells from the latest locked piece (if not cleared/shifted away)
   const freshCells = new Set();
   const lock = frame.event?.players?.[side]?.lock;
-  if (lock && !lock.lines && !(frame.event.players[side].risen || frame.event.solid_risen)) {
+  if (!spin && lock && !lock.lines && !(frame.event.players[side].risen || frame.event.solid_risen)) {
     const pose = lock.pose;
     for (const [dx, dy] of CELLS[pose.piece][pose.rotation]) {
       freshCells.add(`${pose.x + dx},${pose.y + dy}`);
@@ -189,7 +194,7 @@ function drawBoard(side, frame) {
     for (let x = 0; x < 10; x++) {
       const cellVal = rows[y][x];
       if (!cellVal) continue;
-      const colorKey = frame.colors[side][y][x];
+      const colorKey = cellVal === 3 ? 'X' : cellVal === 2 ? 'G' : colors[y]?.[x];
       const kind = cellVal === 3 ? 'solid' : cellVal === 2 ? 'garbage' : 'piece';
       block(ctx, x, 23 - y, cell, COLORS[colorKey] || '#60a5fa', {
         kind,
@@ -198,9 +203,22 @@ function drawBoard(side, frame) {
     }
   }
 
-  // Active spawning piece + ghost landing preview
-  if (!frame.state.finished) {
-    const piece = obs.self.current, cells = CELLS[piece][0], [ox, oy] = obs.rules.spawn_origins[piece];
+  if (spin) {
+    const {from, to, quarterTurns} = spin.trace;
+    const progress = 1 - (1 - spin.progress) ** 2;
+    const x = from.x + (to.x - from.x) * progress;
+    const y = from.y + (to.y - from.y) * progress;
+    ctx.save();
+    ctx.translate((x + 1.5) * cell, (22.5 - y) * cell);
+    ctx.rotate(quarterTurns * Math.PI / 2 * progress);
+    for (const [dx, dy] of CELLS.T[from.rotation]) {
+      block(ctx, dx - 1.5, 0.5 - dy, cell, COLORS.T, {fresh: true});
+    }
+    ctx.restore();
+  } else if (!frame.state.finished) {
+    const piece = obs.self.current, cells = CELLS[piece][0];
+    const spawnOrigins = (obs.rules ?? session.header.rules).spawn_origins;
+    const [ox, oy] = spawnOrigins[piece];
     const fits = y => cells.every(([dx, dy]) => ox + dx >= 0 && ox + dx < 10 && y + dy >= 0 && y + dy < 24 && rows[y + dy][ox + dx] === 0);
     if (fits(oy)) {
       let gy = oy;
@@ -246,25 +264,49 @@ const eliminationReasons = new Map([
   ['invalid JSON response', 'Bot 回复不是有效的 JSON'],
 ]);
 
+function isRealtimeSession(target = session) {
+  return Boolean(target?.header?.rules?.fps);
+}
+
+function formatClock(frame, fps = 60) {
+  const totalSec = Math.max(0, frame) / fps;
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec - mins * 60;
+  return `${String(mins).padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
 function description(event) {
   const messages = [];
+  const active = event.active ?? [0, 1];
   event.players.forEach((player, side) => {
     const who = side ? 'B 方' : 'A 方';
-    if (player.lock?.lines) messages.push(`${who}${player.lock.spin === 'full' ? ' T 旋' : player.lock.spin === 'mini' ? ' Mini' : ''}消除 ${player.lock.lines} 行${player.lock.perfect_clear ? ' · 全消' : ''}`);
+    const spin = spinTitle(player.lock);
+    if (spin) messages.push(`${who} ${spin}`);
+    else if (player.lock?.lines) messages.push(`${who}消除 ${player.lock.lines} 行${player.lock.perfect_clear ? ' · 全消' : ''}`);
     if (player.sent) messages.push(`${who}发出 ${player.sent} 行攻击`);
     if (player.cancelled) messages.push(`${who}抵消 ${player.cancelled} 行`);
+    if (player.combo_blocked) messages.push(`${who}连消阻断垃圾`);
     if (player.risen) messages.push(`${who}升起 ${player.risen} 行垃圾`);
     if (player.reasons.length) {
       const reasons = player.reasons.map(reason => eliminationReasons.get(reason) ?? `Bot 失误（${reason}）`);
       messages.push(`${who}出局 · ${reasons.join('、')}`);
     }
   });
-  if (event.solid_risen) messages.push('加时：双方升起 1 行实心行');
-  if (!messages.length) messages.push('双方完成落块');
+  if (event.solid_risen) messages.push(`加时：双方升起 ${event.solid_risen} 行实心行`);
+  if (!messages.length) {
+    if (event.frame !== undefined && active.length === 0) {
+      messages.push(event.finished ? '达到比赛时限' : '等待落块');
+    } else if (event.frame !== undefined && active.length === 1) {
+      const side = active[0], f = event.players[side].frames;
+      messages.push(`${side ? 'B 方' : 'A 方'}落块${f ? `（${f} 帧）` : ''}`);
+    } else {
+      messages.push('双方完成落块');
+    }
+  }
   return messages.join('；');
 }
 
-function turnInstructions(decision) {
+function turnInstructions({decision, event}) {
   const details = document.createElement('details');
   details.className = 'turn-instructions';
   const summary = document.createElement('summary');
@@ -273,7 +315,10 @@ function turnInstructions(decision) {
   for (const [side, hold] of decision.holds.entries()) {
     const row = document.createElement('p'), route = document.createElement('code');
     row.append(side ? 'B 方：' : 'A 方：');
-    const commands = [...(hold ? ['HOLD'] : []), ...(decision.actions[side] ?? [])];
+    const player = event.players[side];
+    const settled = Object.hasOwn(player, 'hold_used');
+    const commands = [...((settled ? player.hold_used : hold) ? ['HOLD'] : []),
+      ...(settled ? player.commands ?? [] : decision.actions[side] ?? [])];
     route.textContent = commands.length ? commands.join(' · ') : '无有效走法';
     row.append(route);
     details.append(row);
@@ -283,6 +328,52 @@ function turnInstructions(decision) {
 
 function outcomeText(state) {
   return state.outcome === 'no_contest' ? '本局取消' : state.winner === null ? '双方平局' : `${state.winner ? 'B 方' : 'A 方'}获胜`;
+}
+
+function spinTitle(lock) {
+  if (!lock || lock.spin === 'none') return '';
+  const name = lock.spin === 'mini' ? 'Mini T-Spin' : 'T-Spin';
+  const clear = ['', '单消', '双消', '三消'][lock.lines];
+  return clear ? `${name} · ${clear}` : name;
+}
+
+function renderBoards(frame, replaySide = null) {
+  if (displayedFrame === frame && replaySide === null) return;
+  displayedFrame = frame;
+  cancelAnimationFrame(spinAnimation);
+  const previous = session.frames[viewIndex - 1];
+  const rules = session.header.rules;
+  const solidRisen = rules.fps ? frame.event?.solid_risen ?? 0 : 0;
+  const spins = frame.state.players.map((player, side) => {
+    const label = $(side ? 'spin-b' : 'spin-a');
+    const record = frame.event?.players[side];
+    const title = spinTitle(record?.lock);
+    label.textContent = title;
+    const trace = title && previous
+      ? traceTSpin(previous.state.players[side].board, record, rules, solidRisen)
+      : null;
+    label.hidden = !trace;
+    if (!trace) return null;
+    label.setAttribute('aria-label', '重播 ' + (side ? 'B' : 'A') + ' 方的 ' + title + ' 旋转');
+    label.title = '点击重播旋转';
+    if (replaySide === null ? reducedMotion.matches : replaySide !== side) return null;
+    const beforeColors = previous.colors[side];
+    return {trace, colors: [...Array(solidRisen).fill(null), ...beforeColors]};
+  });
+  for (const [side, spin] of spins.entries()) {
+    drawBoard(side, frame, spin && {...spin, progress: 0});
+  }
+  if (!spins.some(Boolean)) return;
+
+  const start = performance.now();
+  function animate(now) {
+    const progress = Math.max(0, (now - start) / SPIN_DURATION);
+    for (const [side, spin] of spins.entries()) {
+      if (spin) drawBoard(side, frame, progress < 1 ? {...spin, progress} : null);
+    }
+    if (progress < 1) spinAnimation = requestAnimationFrame(animate);
+  }
+  spinAnimation = requestAnimationFrame(animate);
 }
 
 function canAdvance() { return session && (viewIndex < session.frames.length - 1 || (session.kind === 'live' && !session.game.finished)); }
@@ -306,11 +397,18 @@ function render() {
     return;
   }
   const frame = session.frames[viewIndex], turn = frame.state.next_turn - 1;
+  const realtime = isRealtimeSession();
+  const fps = session.header.rules.fps || 60;
+  const curClockFrame = frame.event?.frame ?? frame.state.frame ?? 0;
+  const totalClockFrame = session.frames.at(-1)?.event?.frame ?? session.frames.at(-1)?.state?.frame ?? curClockFrame;
   const partialEnd = session.kind === 'replay' && !session.result && viewIndex === session.frames.length - 1;
-  $('turn').textContent = turn;
+  if ($('round-label')) $('round-label').textContent = realtime ? 'TIME' : 'TURN';
+  $('turn').textContent = realtime ? formatClock(curClockFrame, fps) : turn;
   $('timeline').max = session.frames.length - 1;
   $('timeline').value = viewIndex;
-  $('timeline-value').textContent = `${turn} / ${session.frames.length - 1} 回合`;
+  $('timeline-value').textContent = realtime
+    ? `${formatClock(curClockFrame, fps)} / ${formatClock(totalClockFrame, fps)} · ${turn} 步`
+    : `${turn} / ${session.frames.length - 1} 回合`;
 
   let status, state;
   if (busy) { status = '正在读取回放'; state = 'ready'; }
@@ -331,12 +429,23 @@ function render() {
         ? '本地演算演示'
         : session.kind === 'replay'
           ? '裁判重算校验通过'
-          : '独立七袋 · 同步结算';
+          : realtime ? '独立七袋 · 异步结算' : '独立七袋 · 同步结算';
   $('match-detail').textContent = `种子 ${session.seed} · 裁判 ${session.header.engine_version} · ${historyNote}`;
 
   for (let side = 0; side < 2; side++) {
     const letter = side ? 'b' : 'a', player = frame.state.players[side], own = frame.observations[side].self;
     $('bot-name-' + letter).textContent = session.names[side];
+    const paceEl = $('pace-' + letter);
+    if (paceEl) {
+      if (realtime && curClockFrame > 0) {
+        const secs = curClockFrame / fps;
+        const pps = ((player.pieces_placed || 0) / secs).toFixed(2);
+        const apm = ((player.total_sent * 60) / secs).toFixed(1);
+        paceEl.textContent = `${pps} PPS · ${apm} APM`;
+      } else {
+        paceEl.textContent = realtime ? '0.00 PPS · 0.0 APM' : '';
+      }
+    }
     for (const [id, value] of Object.entries({
       lines: player.total_lines,
       sent: player.total_sent,
@@ -377,11 +486,23 @@ function render() {
       }
     }
 
-    drawBoard(side, frame);
     drawMini('current-' + letter, own.current);
     drawMini('hold-' + letter, own.hold);
     drawMini('next-' + letter, own.next);
+    const queueNode = $('queue-' + letter);
+    if (queueNode) {
+      const rest = Array.isArray(own.next_queue) ? own.next_queue.slice(1) : [];
+      queueNode.replaceChildren(...rest.map(piece => {
+        const badge = document.createElement('span');
+        badge.className = `queue-chip piece-${piece}`;
+        badge.textContent = piece;
+        return badge;
+      }));
+      queueNode.hidden = rest.length === 0;
+    }
   }
+
+  renderBoards(frame);
 
   const feed = $('event-feed');
   feed.replaceChildren();
@@ -398,7 +519,7 @@ function render() {
     row.className = 'event-row';
     const time = document.createElement('span');
     time.className = 'event-turn';
-    time.textContent = `T${String(event.turn).padStart(3, '0')}`;
+    time.textContent = event.frame !== undefined ? formatClock(event.frame, fps) : `T${String(event.turn).padStart(3, '0')}`;
     const detail = document.createElement('span');
     detail.className = 'event-description';
     detail.textContent = description(event);
@@ -418,7 +539,7 @@ function render() {
     });
 
     if (event.turn === turn && session.turns[viewIndex - 1]) {
-      li.append(turnInstructions(session.turns[viewIndex - 1].decision));
+      li.append(turnInstructions(session.turns[viewIndex - 1]));
     }
     feed.append(li);
   }
@@ -451,11 +572,23 @@ function rewind() {
 function tick() {
   if (!running) return;
   const token = generation;
+  const speed = Number($('speed').value || 1);
+  let delayMs = 650 / speed;
+  if (isRealtimeSession() && session) {
+    const curFrame = session.frames[viewIndex]?.event?.frame ?? session.frames[viewIndex]?.state?.frame ?? 0;
+    const nextEntry = session.frames[viewIndex + 1];
+    const nextFrame = nextEntry ? (nextEntry.event?.frame ?? nextEntry.state?.frame ?? curFrame + 12) : (curFrame + 12);
+    const deltaFrames = Math.max(2, nextFrame - curFrame);
+    delayMs = Math.max(16, (deltaFrames * 1000 / (session.header.rules.fps || 60)) / speed);
+  }
+  if (!reducedMotion.matches && session.frames[viewIndex]?.event?.players.some(player => spinTitle(player.lock))) {
+    delayMs = Math.max(delayMs, SPIN_DURATION + 30);
+  }
   timer = setTimeout(() => {
     if (!running || token !== generation) return;
     try { advance(); if (running) tick(); }
     catch (error) { paused(); feedback(`本局暂停：${error.message}`, true); render(); }
-  }, 650 / Number($('speed').value || 1));
+  }, delayMs);
 }
 
 function resume() {
@@ -674,6 +807,15 @@ async function restorePracticeAccess() {
     feedback('当前无法访问此自定义回放，请登录发起对局的账号后重新打开。', true);
   }
   document.body.classList.remove('checking-practice-access');
+}
+
+for (const [side, id] of ['spin-a', 'spin-b'].entries()) {
+  $(id).addEventListener('click', () => {
+    if (busy || !session) return;
+    paused();
+    render();
+    renderBoards(session.frames[viewIndex], side);
+  });
 }
 
 window.addEventListener('pagehide', concealPracticeReplay);

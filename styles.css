@@ -438,6 +438,15 @@ button:disabled, input:disabled, select:disabled {
   overflow-wrap: anywhere;
 }
 
+.player-pace {
+  margin-top: 2px;
+  color: var(--subtle);
+  font: 650 11px/1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.player-pace:empty { display: none; }
+
 .player-state {
   max-width: 46%;
   margin-left: auto;
@@ -493,6 +502,7 @@ button:disabled, input:disabled, select:disabled {
 .player-a .player-previews { grid-area: 1 / 1; }
 
 .board-frame {
+  position: relative;
   min-width: 0;
   padding: 4px;
   border: 1px solid var(--player-line);
@@ -509,6 +519,32 @@ button:disabled, input:disabled, select:disabled {
   aspect-ratio: 10 / 24;
   border-radius: 6px;
   background: #080e1c;
+}
+
+.board-spin {
+  position: absolute;
+  inset: 11px 8px auto;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  margin-inline: auto;
+  padding: 4px 9px;
+  border: 1px solid #b78bfa;
+  border-radius: 7px;
+  background: #201339;
+  color: #f3e9ff;
+  font-size: clamp(10px, 1.3vw, 13px);
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+
+.board-spin:hover {
+  background: #352156;
+}
+
+.board-spin:focus-visible {
+  outline: 2px solid #f3e9ff;
+  outline-offset: 2px;
 }
 
 .player-previews {
@@ -545,6 +581,31 @@ button:disabled, input:disabled, select:disabled {
   height: auto;
   aspect-ratio: 120 / 64;
 }
+
+.next-queue {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px 2px 2px;
+  border-top: 1px solid rgba(132, 166, 224, 0.14);
+}
+
+.queue-chip {
+  display: grid;
+  place-items: center;
+  height: 19px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  font: 750 10.5px/1 var(--mono);
+}
+
+.queue-chip.piece-I { color: #4fd8f5; }
+.queue-chip.piece-O { color: #f2cf5b; }
+.queue-chip.piece-T { color: #b78bfa; }
+.queue-chip.piece-S { color: #4ade80; }
+.queue-chip.piece-Z { color: #fb7185; }
+.queue-chip.piece-J { color: #60a5fa; }
+.queue-chip.piece-L { color: #fb923c; }
 
 .incoming {
   padding: 8px 8px 9px;
