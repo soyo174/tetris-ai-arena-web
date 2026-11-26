@@ -10,7 +10,7 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./ladder.css">
-  <script src="./ladder.js" type="module"></script>
+  <script src="./ladder.js?v=0.5.3-local" type="module"></script>
 </head>
 <body class="ladder-page">
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -50,7 +50,7 @@
         <p class="hero-description">上传 Bot 源码参与自动化换座双局赛与 Elo 排位，或随时开启自定义双人对决并在浏览器重算观战。</p>
         <div class="hero-actions">
           <a class="button button-primary hero-primary" href="#upload" data-open-tab="upload">上传 Bot</a>
-          <a class="button button-secondary-accent" href="#custom-match" data-open-tab="practice">自定义对战</a>
+          <a class="button button-secondary-accent" href="./index.html#local-settings">本地自定义</a>
           <a class="button button-quiet hero-secondary" href="./examples/starter_bot.py" download>下载示例 Bot</a>
         </div>
       </div>
@@ -140,7 +140,6 @@
             <button class="filter-pill" type="button" data-history-filter="all" aria-pressed="true">全部</button>
             <button class="filter-pill" type="button" data-history-filter="active" aria-pressed="false">进行中</button>
             <button class="filter-pill" type="button" data-history-filter="completed" aria-pressed="false">已完成</button>
-            <button class="filter-pill" type="button" data-history-filter="practice" aria-pressed="false">自定义</button>
             <button class="filter-pill" type="button" data-history-filter="failed" aria-pressed="false">未结算</button>
           </div>
           <p class="panel-message" id="history-status" role="status" hidden></p>
@@ -154,7 +153,7 @@
           <div class="workbench-tabs" role="tablist" aria-label="操作模式">
             <button class="workbench-tab" id="tab-upload" type="button" role="tab" aria-selected="true" aria-controls="upload" data-tab="upload">上传 Bot</button>
             <button class="workbench-tab" id="tab-challenge" type="button" role="tab" aria-selected="false" aria-controls="challenge-panel" data-tab="challenge">发起挑战</button>
-            <button class="workbench-tab" id="tab-practice" type="button" role="tab" aria-selected="false" aria-controls="custom-match" data-tab="practice">自定义对战</button>
+            <button class="workbench-tab" id="tab-practice" type="button" role="tab" aria-selected="false" aria-controls="custom-match" data-tab="practice">本地练习</button>
           </div>
 
           <section class="workbench-pane action-panel" id="upload" role="tabpanel" aria-labelledby="tab-upload" tabindex="-1">
@@ -179,7 +178,7 @@
                   <p id="source-help">单个 UTF-8 源码文件，最大 256 KiB。</p>
                   <details class="lang-details">
                     <summary>查看支持的编程语言</summary>
-                    <p id="source-languages">Python 3 (.py)、JavaScript (.js)</p>
+                    <p id="source-languages">正在读取服务器支持的语言…</p>
                   </details>
                 </div>
               </div>
@@ -209,44 +208,11 @@
 
           <section class="workbench-pane practice-panel" id="custom-match" role="tabpanel" aria-labelledby="tab-practice" tabindex="-1" hidden>
             <div class="pane-intro">
-              <h2 id="custom-match-title">自定义单局对战</h2>
-              <p>为 A/B 座自由选择官方 Bot、已有版本或临时上传源码，不计入天梯 Elo。</p>
+              <h2 id="custom-match-title">本地自定义对战</h2>
+              <p>网页可在本机运行内置 Bot。使用自己编写的 Bot 时，下载裁判在本机开赛，然后把 JSONL 回放导入观战页。</p>
             </div>
-            <form class="ladder-form" id="practice-form">
-              <div class="practice-seats">
-                <fieldset class="field seat-fieldset seat-fieldset-a">
-                  <legend><span class="seat-tag seat-tag-a">A 座</span> 先手方</legend>
-                  <label for="practice-a">选择已有或官方 Bot</label>
-                  <select id="practice-a"><option value="">选择 Bot</option></select>
-                  <label class="sub-label" for="practice-file-a">或上传临时源码（优先使用）</label>
-                  <div class="file-box file-box-compact dropzone" data-dropzone="practice-file-a">
-                    <input type="file" id="practice-file-a" accept=".py,.js">
-                    <div class="dropzone-status" id="practice-file-a-status" hidden>
-                      <span class="file-chip-name" id="practice-file-a-name"></span>
-                      <button class="file-clear-btn" type="button" data-clear-file="practice-file-a" aria-label="清除 A 座文件">×</button>
-                    </div>
-                  </div>
-                </fieldset>
-                <fieldset class="field seat-fieldset seat-fieldset-b">
-                  <legend><span class="seat-tag seat-tag-b">B 座</span> 后手方</legend>
-                  <label for="practice-b">选择已有或官方 Bot</label>
-                  <select id="practice-b"><option value="">选择 Bot</option></select>
-                  <label class="sub-label" for="practice-file-b">或上传临时源码（优先使用）</label>
-                  <div class="file-box file-box-compact dropzone" data-dropzone="practice-file-b">
-                    <input type="file" id="practice-file-b" accept=".py,.js">
-                    <div class="dropzone-status" id="practice-file-b-status" hidden>
-                      <span class="file-chip-name" id="practice-file-b-name"></span>
-                      <button class="file-clear-btn" type="button" data-clear-file="practice-file-b" aria-label="清除 B 座文件">×</button>
-                    </div>
-                  </div>
-                </fieldset>
-              </div>
-              <div class="practice-actions">
-                <button class="button button-primary action-primary" type="submit" id="practice-submit">登录后开赛</button>
-                <button class="button button-quiet" type="button" id="practice-swap">互换 A/B 座</button>
-              </div>
-              <p class="form-feedback" id="practice-feedback" role="status"></p>
-            </form>
+            <a class="button button-primary" href="./index.html#local-settings">打开本地竞技场</a>
+            <a class="button button-quiet" href="./examples/tetra-referee.zip" download>下载裁判和 C++20 基准</a>
           </section>
         </div>
       </aside>
@@ -255,7 +221,7 @@
     <footer class="ladder-footer">
       <a href="./rules.html">对战与天梯计分规则</a>
       <a href="./index.html">观战与官方回放</a>
-      <a href="/api/referee/download" data-arena-referee download>下载本地裁判</a>
+      <a href="./examples/tetra-referee.zip" download>下载本地裁判</a>
     </footer>
   </main>
 

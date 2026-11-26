@@ -5,10 +5,6 @@ const accountDialog = byId("account-dialog");
 const uploadForm = byId("upload-form");
 const ownSelect = byId("challenge-bot");
 const opponentSelect = byId("challenge-opponent");
-const practiceSeats = ["a", "b"].map(seat => ({
-  select: byId(`practice-${seat}`),
-  file: byId(`practice-file-${seat}`),
-}));
 const historyList = byId("challenge-list");
 const rankingRows = byId("ranking-rows");
 const numberFormat = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
@@ -76,7 +72,6 @@ for (const link of document.querySelectorAll("[data-open-tab]")) {
     const tab = link.dataset.openTab;
     switchTab(tab, {focusPane: true});
     if (tab === "upload") byId("bot-name")?.focus();
-    else if (tab === "practice") byId("practice-a")?.focus();
   });
 }
 
@@ -142,23 +137,6 @@ for (const clearBtn of document.querySelectorAll("[data-clear-file]")) {
     if (!input) return;
     input.value = "";
     syncFileDisplay(inputId);
-  });
-}
-
-/* Swap A/B seats in custom match */
-if (byId("practice-swap")) {
-  byId("practice-swap").addEventListener("click", () => {
-    const aSelect = byId("practice-a"), bSelect = byId("practice-b");
-    [aSelect.value, bSelect.value] = [bSelect.value, aSelect.value];
-    const aFile = byId("practice-file-a"), bFile = byId("practice-file-b");
-    const aFiles = Array.from(aFile.files ?? []), bFiles = Array.from(bFile.files ?? []);
-    const dtA = new DataTransfer(), dtB = new DataTransfer();
-    bFiles.forEach(f => dtA.items.add(f));
-    aFiles.forEach(f => dtB.items.add(f));
-    aFile.files = dtA.files;
-    bFile.files = dtB.files;
-    syncFileDisplay("practice-file-a");
-    syncFileDisplay("practice-file-b");
   });
 }
 
@@ -521,7 +499,6 @@ function matchesHistoryFilter(challenge) {
   if (historyFilter === "all") return true;
   if (historyFilter === "active") return challenge.status === "queued" || challenge.status === "running";
   if (historyFilter === "completed") return challenge.status === "completed";
-  if (historyFilter === "practice") return Boolean(challenge.practice);
   if (historyFilter === "failed") return challenge.status === "failed";
   return true;
 }
@@ -543,7 +520,7 @@ function renderHistory() {
   const filtered = records ? records.filter(matchesHistoryFilter) : [];
   let empty = "挑战记录载入中…";
   if (records) {
-    empty = records.length ? "当前筛选条件下没有挑战记录。" : "暂无挑战。上传 Bot 或发起自定义对战后可在这里查看进度。";
+    empty = records.length ? "当前筛选条件下没有挑战记录。" : "暂无挑战。发起天梯挑战后可在这里查看进度。";
   }
   if (error && !records) empty = "接通天梯服务后，挑战与回放会在这里显示。";
   const message = error && records ? `${error.message} 当前显示最近一次加载的数据。` : error && state.health ? error.message : "";
@@ -607,17 +584,7 @@ function renderControls() {
   const accept = languages.map(({extension}) => extension).join(",");
   byId("bot-source").accept = accept;
   setText(byId("source-help"), sourceHelp());
-  setText(byId("source-languages"), languages.map(({name, extension}) => `${name} (${extension})`).join("、"));
-  const practiceBots = [...(state.health?.practice_bots ?? []), ...bots];
-  for (const {select, file} of practiceSeats) {
-    setOptions(select, "选择官方或我的 Bot", practiceBots);
-    select.disabled = Boolean(state.pending);
-    file.disabled = Boolean(state.pending);
-    file.accept = accept;
-  }
-  const practice = byId("practice-submit");
-  practice.disabled = Boolean(state.pending);
-  setText(practice, state.pending === "practice" ? "正在创建…" : user ? "开始自定义对战" : "登录后开赛");
+  if (state.health) setText(byId("source-languages"), languages.map(({name, extension}) => `${name} (${extension})`).join("、"));
 }
 
 function updateAuthMode(mode) {
@@ -805,52 +772,10 @@ byId("challenge-form").addEventListener("submit", event => {
   });
 });
 
-byId("practice-form").addEventListener("submit", event => {
-  event.preventDefault();
-  if (!state.session?.user) {
-    openAuth(byId("practice-submit"));
-    return;
-  }
-  const entries = practiceSeats.map(({select, file}) => ({select, file, source: file.files[0]}));
-  if (entries.some(entry => !entry.source && !entry.select.value)) {
-    setMessage("practice-feedback", "请给两个座位各选一个 Bot 或上传一个文件。", "error");
-    return;
-  }
-  if (entries.some(({source}) => source && !validSource(source))) {
-    setMessage("practice-feedback", sourceHelp(), "error");
-    return;
-  }
-  void mutate("practice", "practice-feedback", async () => {
-    const drafts = await Promise.all(entries.map(async entry => ({
-      ...entry, text: entry.source ? await readSource(entry.source) : null,
-    })));
-    const ids = [];
-    for (const {select, file, source, text} of drafts) {
-      if (!source) {
-        ids.push(select.value);
-        continue;
-      }
-      const name = source.name.slice(0, -sourceExtension(source.name).length).trim().slice(0, 40) || "Bot";
-      const {bot} = await request("/api/bots", {
-        name, filename: source.name, source: text, auto_challenge: false,
-      });
-      state.myBots = [bot, ...(state.myBots ?? [])];
-      renderControls();
-      select.value = bot.id;
-      file.value = "";
-      syncFileDisplay(file.id);
-      ids.push(bot.id);
-    }
-    const {challenge} = await request("/api/practice", {a_id: ids[0], b_id: ids[1]});
-    cacheNewChallenge(challenge);
-    setMessage("practice-feedback", "对局已排队。完成后可从左侧近期挑战观看回放。", "success");
-  });
-});
-
 byId("bot-search").addEventListener("input", renderLeaderboard);
 byId("mine-filter").addEventListener("change", renderLeaderboard);
 byId("refresh").addEventListener("click", refresh);
-for (const select of [ownSelect, opponentSelect, ...practiceSeats.map(seat => seat.select)]) select.addEventListener("blur", () => queueMicrotask(renderControls));
+for (const select of [ownSelect, opponentSelect]) select.addEventListener("blur", () => queueMicrotask(renderControls));
 historyList.addEventListener("focusout", () => queueMicrotask(renderHistory));
 document.addEventListener("visibilitychange", refresh);
 window.addEventListener("online", refresh);

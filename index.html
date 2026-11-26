@@ -9,7 +9,7 @@
   <title>TETRA ARENA · AI 方块竞技场</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=0.5.3-local-bots"></script>
 </head>
 <body>
   <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -63,8 +63,8 @@
           </div>
         </div>
         <div class="topbar-links">
-          <a class="button button-quiet button-sm" href="./ladder.html#custom-match">自定义对战</a>
-          <a class="button button-quiet button-sm" href="/api/referee/download" data-arena-referee download>
+          <a class="button button-quiet button-sm" href="#local-settings">本地自定义</a>
+          <a class="button button-quiet button-sm" href="./examples/tetra-referee.zip" download>
             <svg class="icon" aria-hidden="true"><use href="#icon-download"/></svg>
             <span>本地裁判</span>
           </a>
@@ -255,30 +255,44 @@
         </ol>
       </section>
 
-      <section class="surface settings" aria-labelledby="settings-heading">
+      <section class="surface settings" id="local-settings" aria-labelledby="settings-heading">
         <div class="surface-head">
           <h2 class="section-heading" id="settings-heading">
-            <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>本地演示沙盘
+            <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>本地自定义对战
           </h2>
-          <span class="surface-tip">浏览器内置基准 AI</span>
+          <span class="surface-tip">裁判 v0.5.3</span>
         </div>
-        <p class="section-note">配置双方内置策略与随机种子，无需后端即可在本地实时演算对局。</p>
+        <p class="section-note">选择双方 Bot 和随机种子。也可打开符合本地裁判协议的 WASM 文件，对局和文件均留在浏览器。</p>
         <div class="settings-fields">
           <div class="field">
             <label for="bot-a"><span class="label-dot label-dot-a" aria-hidden="true"></span>选手 A 策略</label>
             <select id="bot-a">
-              <option value="greedy" selected>贪心策略</option>
-              <option value="random">随机策略</option>
-              <option value="drop">垂直硬降</option>
+              <option value="weak">弱 Bot</option>
+              <option value="medium">中 Bot</option>
+              <option value="strong">强 Bot</option>
+              <option value="neno" selected>neno</option>
+              <option value="northstar">北极星</option>
+              <option value="custom">自选 WASM 文件</option>
             </select>
+            <div id="local-file-a" hidden>
+              <label for="local-bot-a">本地 Bot 文件</label>
+              <input id="local-bot-a" type="file" accept=".wasm,application/wasm">
+            </div>
           </div>
           <div class="field">
             <label for="bot-b"><span class="label-dot label-dot-b" aria-hidden="true"></span>选手 B 策略</label>
             <select id="bot-b">
-              <option value="greedy" selected>贪心策略</option>
-              <option value="random">随机策略</option>
-              <option value="drop">垂直硬降</option>
+              <option value="weak">弱 Bot</option>
+              <option value="medium">中 Bot</option>
+              <option value="strong">强 Bot</option>
+              <option value="neno">neno</option>
+              <option value="northstar" selected>北极星</option>
+              <option value="custom">自选 WASM 文件</option>
             </select>
+            <div id="local-file-b" hidden>
+              <label for="local-bot-b">本地 Bot 文件</label>
+              <input id="local-bot-b" type="file" accept=".wasm,application/wasm">
+            </div>
           </div>
           <div class="field">
             <label for="seed">随机种子</label>
@@ -288,7 +302,7 @@
         <div class="settings-actions">
           <button class="button button-secondary-accent" id="start-match" type="button">
             <svg class="icon" aria-hidden="true"><use href="#icon-play"/></svg>
-            <span>运行本地演示</span>
+            <span>开始本地对战</span>
           </button>
           <button class="button button-quiet" id="random-seed" type="button">随机种子</button>
         </div>
@@ -332,7 +346,7 @@
       <p>满 60 秒（3600 帧）首次加时，之后每 4 秒（240 帧）双方各增 1 行实心行，单局上限 180 秒（10800 帧）。同帧单方程序违规、另一方合法出局时判合法方获胜。</p>
 
       <h3>网页与回放</h3>
-      <p>新对局使用裁判 v0.5.3 实时规则 <code>reference-realtime-v5.3</code>（首手 1000 ms，后续每手 100 ms + 2000 ms 共享时间池），并完整兼容重算 v0.1.0 至 v0.5.2 的历史回放。</p>
+      <p>新对局使用裁判 v0.5.3 实时规则 <code>reference-realtime-v5.3</code>（首手 1000 ms，后续每手 100 ms + 2000 ms 共享时间池）。旧裁判的对局已归档。</p>
     </div>
     <div class="dialog-actions">
       <a class="button button-quiet" href="./rules.html">查看完整图文规则 →</a>

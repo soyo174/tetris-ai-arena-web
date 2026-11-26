@@ -1,10 +1,12 @@
-import {createDuel, PythonRandom, CELLS, traceTSpin} from './engine.mjs';
+import {createDuel, CELLS, traceTSpin} from './engine.mjs?v=0.5.3-local';
 import {apiFetch} from './api.mjs';
-import {createHeader, makeFrame, playOfficialReplay, playTurn, serializeReplay, summarize, validateReplay, replayBotModes, MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES} from './replay.mjs';
+import {LocalBot} from './local-bots.mjs';
+import {createHeader, makeFrame, playOfficialReplay, serializeReplay, summarize, validateReplay, replayBotModes, MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES, CURRENT_ENGINE_VERSION} from './replay.mjs?v=0.5.3-local';
 
 const $ = id => document.getElementById(id);
-const NAMES = {greedy: '贪心 AI', random: '随机 AI', drop: '硬降 AI'};
-const OFFICIAL_NAMES = {strong: '强 Bot', medium: '中 Bot', weak: '弱 Bot'};
+const NAMES = {weak: '弱 Bot', medium: '中 Bot', strong: '强 Bot', neno: 'neno', northstar: '北极星'};
+const DEFAULT_BOTS = ['neno', 'northstar'];
+const SEAT_INPUTS = ['a', 'b'];
 const COLORS = {
   I: '#4fd8f5',
   O: '#f2cf5b',
@@ -17,7 +19,7 @@ const COLORS = {
   X: '#475569',
 };
 let session = null, viewIndex = 0, running = false, timer = null, busy = true, generation = 0;
-let activeOfficialId = null;
+let advancing = null;
 let displayedFrame = null, spinAnimation = 0;
 const SPIN_DURATION = 340;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -35,7 +37,6 @@ function paused() {
 }
 
 function setOfficialActive(id = null) {
-  activeOfficialId = id;
   for (const button of document.querySelectorAll('[data-official]')) {
     button.setAttribute('aria-pressed', String(button.dataset.official === id));
   }
@@ -384,8 +385,9 @@ function render() {
   $('import-replay').disabled = busy;
   $('restart-match').disabled = busy || !session;
   $('export-replay').disabled = busy || !session || !session.turns.length;
-  $('pause-match').disabled = busy || !canAdvance();
-  $('step-match').disabled = busy || !canAdvance();
+  const calculating = advancing === session && session !== null;
+  $('pause-match').disabled = busy || !canAdvance() || (calculating && !running);
+  $('step-match').disabled = busy || !canAdvance() || calculating;
   if ($('step-back')) $('step-back').disabled = busy || !canRewind();
   $('pause-label').textContent = running ? '暂停' : session?.kind === 'replay' ? '播放回放' : '继续';
   $('pause-match').dataset.paused = String(!running);
@@ -415,8 +417,8 @@ function render() {
   else if (frame.state.finished) { status = outcomeText(frame.state); state = 'finished'; }
   else if (partialEnd) { status = '阶段回放已结束'; state = 'replay'; }
   else if (session.kind === 'replay') { status = running ? '回放播放中' : '回放已暂停'; state = 'replay'; }
-  else if (running) { status = '对战进行中'; state = 'running'; }
-  else { status = session.demo ? '演示局 · 已暂停' : '比赛已暂停'; state = 'paused'; }
+  else if (running || calculating) { status = '本地对战进行中'; state = 'running'; }
+  else { status = session.turns.length ? '本地对战已暂停' : '本地对战已就绪'; state = 'paused'; }
 
   $('match-status').textContent = status;
   $('match-status').dataset.state = state;
@@ -425,12 +427,10 @@ function render() {
     ? (session.turns.length ? '尚无赛果，可拖动时间轴查看' : '仅含初始棋盘')
     : viewIndex < session.frames.length - 1
       ? '正在回看历史回合'
-      : session.demo
-        ? '本地演算演示'
-        : session.kind === 'replay'
-          ? '裁判重算校验通过'
-          : realtime ? '独立七袋 · 异步结算' : '独立七袋 · 同步结算';
-  $('match-detail').textContent = `种子 ${session.seed} · 裁判 ${session.header.engine_version} · ${historyNote}`;
+      : session.kind === 'replay'
+        ? '裁判重算校验通过'
+        : '浏览器本地运行';
+  $('match-detail').textContent = `种子 ${session.seed} · 裁判 v${CURRENT_ENGINE_VERSION} · ${historyNote}`;
 
   for (let side = 0; side < 2; side++) {
     const letter = side ? 'b' : 'a', player = frame.state.players[side], own = frame.observations[side].self;
@@ -545,17 +545,81 @@ function render() {
   }
 }
 
-function addTurn(target) {
-  const record = playTurn(target.game, target.modes, target.rngs);
-  target.turns.push(record);
-  target.frames.push(colorFrame(makeFrame(target.game, record.event), target.frames.at(-1), record));
-  if (target.game.finished) target.result = summarize(target.game, record.event);
+function replaceSession(target) {
+  session?.bots?.forEach(bot => bot.close());
+  session = target;
 }
 
-function advance() {
-  if (busy || !canAdvance()) return false;
-  if (viewIndex < session.frames.length - 1) viewIndex++;
-  else { addTurn(session); viewIndex = session.frames.length - 1; session.demo = false; }
+async function openLocalBots(target) {
+  feedback('正在加载本地 Bot…');
+  const loaded = await Promise.allSettled(target.modes.map((mode, side) => LocalBot.open(mode, target.files[side])));
+  const bots = loaded.filter(entry => entry.status === 'fulfilled').map(entry => entry.value);
+  if (target !== session || bots.length !== target.modes.length) {
+    bots.forEach(bot => bot.close());
+    if (target !== session) return false;
+    throw loaded.find(entry => entry.status === 'rejected').reason;
+  }
+  target.bots = bots;
+  feedback();
+  return true;
+}
+
+async function addTurn(target) {
+  const game = target.game;
+  const active = game.activeSides();
+  if (active.length && !target.bots && !await openLocalBots(target)) return;
+  await Promise.all(active.map(async side => {
+    const bot = target.bots[side];
+    const {first_think_ms, think_ms} = game.rules;
+    const budget = game.players[side].pieces_placed ? think_ms : first_think_ms;
+    try {
+      let response = await bot.decide(game.observe(side), budget, 0);
+      if (target !== session) return;
+      if (response.type === 'HOLD') {
+        if (!game.hold(side)) return;
+        response = await bot.decide(game.observe(side), budget, 0);
+        if (target !== session) return;
+      }
+      if (response.type !== 'PLAY') throw new Error('Bot 没有提交完整走法');
+      game.submit(side, response.commands, 0);
+    } catch (error) {
+      if (target === session && !(side in game.failures)) game.fail(side, String(error.message || error));
+    }
+  }));
+  if (target !== session) return;
+  const decision = structuredClone({
+    holds: game.players.map(player => player.hold_used),
+    actions: game.actions, failures: game.failures, think_frames: game.think_frames,
+  });
+  const event = game.settle();
+  const record = {type: 'TURN', decision, event, state: game.snapshot()};
+  target.turns.push(record);
+  target.frames.push(colorFrame(makeFrame(game, event), target.frames.at(-1), record));
+  if (game.finished) {
+    target.result = summarize(game, event);
+    target.bots?.forEach(bot => bot.close());
+    target.bots = null;
+  }
+}
+
+async function advance() {
+  if (busy || advancing === session || !canAdvance()) return false;
+  const target = session;
+  if (viewIndex < target.frames.length - 1) {
+    viewIndex++;
+  } else {
+    advancing = target;
+    const previousIndex = viewIndex;
+    try {
+      $('step-match').disabled = true;
+      if (!running) $('pause-match').disabled = true;
+      await addTurn(target);
+      if (target !== session) return false;
+      if (viewIndex === previousIndex) viewIndex = target.frames.length - 1;
+    } finally {
+      if (advancing === target) advancing = null;
+    }
+  }
   if (!canAdvance()) paused();
   render();
   return true;
@@ -570,7 +634,7 @@ function rewind() {
 }
 
 function tick() {
-  if (!running) return;
+  if (!running || advancing === session) return;
   const token = generation;
   const speed = Number($('speed').value || 1);
   let delayMs = 650 / speed;
@@ -584,32 +648,33 @@ function tick() {
   if (!reducedMotion.matches && session.frames[viewIndex]?.event?.players.some(player => spinTitle(player.lock))) {
     delayMs = Math.max(delayMs, SPIN_DURATION + 30);
   }
-  timer = setTimeout(() => {
+  timer = setTimeout(async () => {
     if (!running || token !== generation) return;
-    try { advance(); if (running) tick(); }
-    catch (error) { paused(); feedback(`本局暂停：${error.message}`, true); render(); }
+    try { await advance(); if (running && token === generation) tick(); }
+    catch (error) { if (token !== generation) return; paused(); feedback(`本局暂停：${error.message}`, true); render(); }
   }, delayMs);
 }
 
 function resume() {
-  if (busy || !canAdvance()) return;
-  paused(); running = true; session.demo = false; feedback(); render(); tick();
+  if (busy || advancing === session || !canAdvance()) return;
+  paused(); running = true; feedback(); render(); tick();
 }
 
-async function newMatch(seed, modes, {autoplay = true, demo = false} = {}) {
+async function newMatch(seed, modes, {autoplay = true, files = [null, null]} = {}) {
   const token = ++generation;
-  setOfficialActive(null);
+  setOfficialActive();
   paused(); busy = true; feedback(); render();
   try {
     const game = await createDuel(seed);
     if (token !== generation) return;
-    const target = {
-      kind: 'live', seed, modes, names: modes.map(mode => NAMES[mode]), game,
-      rngs: [new PythonRandom(0), new PythonRandom(0)], header: createHeader(game, modes),
-      frames: [colorFrame(makeFrame(game))], turns: [], result: null, demo,
-    };
-    if (demo) for (let i = 0; i < 24 && !game.finished; i++) addTurn(target);
-    session = target; viewIndex = target.frames.length - 1; busy = false; render();
+    const names = modes.map((mode, side) => files[side]?.name ?? NAMES[mode]);
+    const header = createHeader(game, modes);
+    header.bots = names.map(name => ['browser-wasm', name]);
+    replaceSession({
+      kind: 'live', seed, modes, files, names, game, header,
+      frames: [colorFrame(makeFrame(game))], turns: [], result: null, bots: null,
+    });
+    viewIndex = 0; busy = false; render();
     if (autoplay) resume();
   } catch (error) {
     if (token === generation) { busy = false; feedback(`无法开始比赛：${error.message}`, true); render(); }
@@ -619,14 +684,30 @@ async function newMatch(seed, modes, {autoplay = true, demo = false} = {}) {
 function readSettings() {
   const raw = $('seed').value.trim();
   if (!/^[+-]?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error('请输入有效的整数种子，范围为 ±9007199254740991。');
-  return {seed: Number(raw), modes: [$('bot-a').value, $('bot-b').value]};
+  const modes = SEAT_INPUTS.map(seat => $('bot-' + seat).value);
+  const files = modes.map((mode, side) => {
+    if (Object.hasOwn(NAMES, mode)) return null;
+    const file = $('local-bot-' + SEAT_INPUTS[side]).files[0];
+    if (!file) throw new Error('请为自选 Bot 座位选择一个 WASM 文件。');
+    if (!/\.wasm$/i.test(file.name) || file.size > 16 * 1024 * 1024) {
+      throw new Error('请选择不超过 16 MiB 的 Bot WASM 文件。');
+    }
+    return file;
+  });
+  return {seed: Number(raw), modes, files};
+}
+
+for (const seat of SEAT_INPUTS) {
+  const select = $('bot-' + seat);
+  const picker = $('local-file-' + seat);
+  select.addEventListener('change', () => { picker.hidden = select.value !== 'custom'; });
 }
 
 $('start-match').addEventListener('click', () => {
   try {
-    const {seed, modes} = readSettings();
+    const {seed, modes, files} = readSettings();
     try { localStorage.setItem('tetra-arena-settings', JSON.stringify({seed, modes})); } catch { /* optional browser persistence */ }
-    newMatch(seed, modes);
+    void newMatch(seed, modes, {files});
   } catch (error) { feedback(error.message, true); }
 });
 
@@ -637,14 +718,18 @@ if ($('random-seed')) {
 }
 
 $('pause-match').addEventListener('click', () => { if (running) { paused(); render(); } else resume(); });
-$('step-match').addEventListener('click', () => { paused(); feedback(); try { advance(); } catch (error) { feedback(error.message, true); render(); } });
+$('step-match').addEventListener('click', async () => {
+  paused(); feedback();
+  try { await advance(); }
+  catch (error) { feedback(error.message, true); render(); }
+});
 if ($('step-back')) {
   $('step-back').addEventListener('click', () => { feedback(); rewind(); });
 }
 $('restart-match').addEventListener('click', () => {
   if (!session || busy) return;
   if (session.kind === 'replay') { paused(); viewIndex = 0; feedback(); render(); }
-  else newMatch(session.seed, session.modes, {autoplay: false});
+  else void newMatch(session.seed, session.modes, {autoplay: false, files: session.files});
 });
 $('speed').addEventListener('change', () => { if (running) { clearTimeout(timer); tick(); } });
 $('timeline').addEventListener('input', () => {
@@ -666,10 +751,14 @@ $('import-replay').addEventListener('click', () => $('replay-file').click());
 function acceptReplay(replay, names = null) {
   replay.frames.forEach((frame, i) => colorFrame(frame, i ? replay.frames[i - 1] : null, i ? replay.turns[i - 1] : null));
   const modes = replayBotModes(replay.header);
-  session = {
+  replaceSession({
     ...replay, kind: 'replay', seed: replay.header.seed, modes,
-    names: names || modes.map((mode, side) => NAMES[mode] || `外部 AI ${side ? 'B' : 'A'}`), demo: false,
-  };
+    names: names || modes.map((mode, side) => {
+      const argv = replay.header.bots?.[side];
+      return (argv?.[0] === 'browser-wasm' ? argv[1] : NAMES[mode])
+        || `外部 AI ${side ? 'B' : 'A'}`;
+    }),
+  });
   viewIndex = 0; busy = false;
   feedback(replay.turns.length ? `已校验 ${replay.turns.length} 回合${replay.result ? '完整' : '阶段'}回放。` : '已校验初始棋盘，此文件尚未记录任何回合。');
   render();
@@ -678,7 +767,7 @@ function acceptReplay(replay, names = null) {
 async function loadLadderReplay(matchId) {
   if (!/^[a-f0-9]{32}$/.test(matchId)) { feedback('天梯对局编号无效，请从排行榜重新打开。', true); return; }
   const token = ++generation;
-  setOfficialActive(null);
+  setOfficialActive();
   paused(); busy = true; feedback('正在下载并重算天梯对局…'); render();
   try {
     const [metadataResponse, replayResponse] = await Promise.all([
@@ -688,7 +777,7 @@ async function loadLadderReplay(matchId) {
     if (!metadataResponse.ok || !replayResponse.ok) throw new Error('无法获取该对局，请确认天梯服务正在运行。');
     if (Number(replayResponse.headers.get('content-length')) > MAX_SERVER_REPLAY_BYTES) throw new Error('服务器回放超过 32 MiB。');
     const metadata = await metadataResponse.json();
-    const replay = await validateReplay(await replayResponse.text(), {maxBytes: MAX_SERVER_REPLAY_BYTES});
+    const replay = await validateReplay(await replayResponse.text(), {maxBytes: MAX_SERVER_REPLAY_BYTES, currentOnly: true});
     if (token !== generation) return;
     if (!replay.result) throw new Error('天梯比赛缺少完整赛果。');
     acceptReplay(replay, [metadata.a, metadata.b].map(bot => `${bot.name} · v${bot.version}`));
@@ -709,15 +798,16 @@ async function loadOfficialReplay(id, autoplay) {
   setOfficialActive(id);
   paused(); busy = true; feedback('正在校验官方 Bot 回放…'); render();
   try {
-    officialReplays ??= fetch(new URL('./examples/official-replays.json', import.meta.url)).then(response => {
+    officialReplays ??= fetch(new URL('./examples/official-replays.json?v=0.5.3-cpp', import.meta.url)).then(response => {
       if (!response.ok) throw new Error('官方回放暂不可用。');
       return response.json();
     }).catch(error => { officialReplays = null; throw error; });
     const match = (await officialReplays).find(entry => entry.id === id);
     if (!match) throw new Error('没有找到这组官方 Bot 回放。');
+    if (match.header.engine_version !== CURRENT_ENGINE_VERSION) throw new Error('这组回放已归档。');
     const replay = await playOfficialReplay(match);
     if (token !== generation) return;
-    acceptReplay(replay, id.split('-').map(tier => OFFICIAL_NAMES[tier]));
+    acceptReplay(replay, id.split('-').map(tier => NAMES[tier]));
     if (autoplay) resume();
     feedback(`官方 Bot 实战回放 · ${replay.turns.length} 回合`);
   } catch (error) {
@@ -735,10 +825,9 @@ $('replay-file').addEventListener('change', async event => {
   const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
   if (file.size > MAX_REPLAY_BYTES) { feedback('回放文件过大，请选择不超过 8 MB 的 JSONL 文件。', true); return; }
   const token = ++generation, wasRunning = running;
-  setOfficialActive(null);
   paused(); busy = true; feedback('正在重新计算并校验回放…'); render();
   try {
-    const replay = await validateReplay(await file.text());
+    const replay = await validateReplay(await file.text(), {currentOnly: true});
     if (token !== generation) return;
     acceptReplay(replay);
   } catch (error) {
@@ -803,7 +892,7 @@ async function restorePracticeAccess() {
   if (session !== current || document.hidden) return;
   if (!allowed) {
     session = null;
-    await newMatch(7, ['greedy', 'greedy'], {autoplay: false, demo: true});
+    await newMatch(7, DEFAULT_BOTS, {autoplay: false});
     feedback('当前无法访问此自定义回放，请登录发起对局的账号后重新打开。', true);
   }
   document.body.classList.remove('checking-practice-access');
@@ -827,13 +916,17 @@ document.addEventListener('visibilitychange', () => {
   } else void restorePracticeAccess();
 });
 
+let settings = {seed: 7, modes: DEFAULT_BOTS};
 try {
   const stored = JSON.parse(localStorage.getItem('tetra-arena-settings') || 'null');
-  if (stored && Number.isSafeInteger(stored.seed) && stored.modes?.length === 2 && stored.modes.every(mode => NAMES[mode])) {
-    $('seed').value = stored.seed; $('bot-a').value = stored.modes[0]; $('bot-b').value = stored.modes[1];
+  if (stored && Number.isSafeInteger(stored.seed) && Array.isArray(stored.modes)
+      && stored.modes.length === 2 && stored.modes.every(mode => Object.hasOwn(NAMES, mode))) {
+    settings = stored;
   }
 } catch { /* default selectors stay usable */ }
+$('seed').value = settings.seed;
+$('bot-a').value = settings.modes[0];
+$('bot-b').value = settings.modes[1];
 const requestedMatch = new URLSearchParams(location.search).get('match');
-await newMatch(7, ['greedy', 'greedy'], {autoplay: false, demo: !requestedMatch});
+await newMatch(settings.seed, settings.modes, {autoplay: false});
 if (requestedMatch) await loadLadderReplay(requestedMatch);
-else await loadOfficialReplay('strong-medium', false);

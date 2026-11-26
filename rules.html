@@ -8,7 +8,7 @@
   <title>完整对战规则 · TETRA ARENA</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./rules.css">
-  <script type="module" src="./rules.js"></script>
+  <script type="module" src="./rules.js?v=0.5.3-local"></script>
 </head>
 <body id="top">
   <a class="skip-link" href="#rules-content">跳到规则正文</a>
@@ -344,7 +344,7 @@
               </tbody>
             </table>
           </div>
-          <p class="note">新对局使用裁判 0.5.3 的默认配置 <code>reference-realtime-v5.3</code>。参赛程序可通过首次公开的配置、几何和规则指纹确认所用规则。历史 0.1.0 至 0.5.2 回放继续按原规则重算。</p>
+          <p class="note">新对局使用裁判 0.5.3 的默认配置 <code>reference-realtime-v5.3</code>。参赛程序可通过首次公开的配置、几何和规则指纹确认所用规则。旧裁判的对局已归档。</p>
         </section>
 
         <section class="rule-section" id="referee" aria-labelledby="referee-heading">
@@ -359,13 +359,13 @@
               <tbody>
                 <tr><th scope="row">确认当前配置</th><td><code>GET /api/health</code> 返回规则指纹、在线语言与运行限制。</td><td><code>python -m arena export-rules public.json</code> 导出规则、几何与指纹。</td></tr>
                 <tr><th scope="row">账号与天梯</th><td><code>GET /api/session</code>、<code>GET /api/leaderboard</code>、<code>GET /api/bots/mine</code>。注册、登录和退出使用 <code>POST /api/register</code>、<code>/api/login</code> 和 <code>/api/logout</code>。</td><td>账号、Bot 版本与 Elo 由线上服务维护。</td></tr>
-                <tr><th scope="row">上传与开赛</th><td><code>POST /api/bots</code> 上传，<code>POST /api/challenges</code> 发起天梯挑战，<code>POST /api/practice</code> 开自定义对战。<code>GET /api/challenges</code> 查询近期挑战。</td><td><code>python -m arena match</code> 运行一局，可用 <code>--a-command</code> 和 <code>--b-command</code> 接入本地 Bot。</td></tr>
+                <tr><th scope="row">上传与开赛</th><td><code>POST /api/bots</code> 上传，<code>POST /api/challenges</code> 发起天梯挑战。<code>GET /api/challenges</code> 查询近期挑战。</td><td><code>python -m arena match</code> 运行一局，可用 <code>--a-command</code> 和 <code>--b-command</code> 接入本地 Bot。</td></tr>
                 <tr><th scope="row">观战与回放</th><td><code>GET /api/matches/{id}</code> 取比赛摘要，<code>GET /api/matches/{id}/replay</code> 取 JSONL。</td><td><code>python -m arena verify replay.jsonl</code> 校验，<code>python -m arena render replay.jsonl replay.html</code> 导出网页。浏览器集成使用 <code>browser/replay.mjs</code>。</td></tr>
                 <tr><th scope="row">下载裁判</th><td><code>GET /api/referee/download</code></td><td><code>tetra-referee.zip</code> 包内的 <code>README.md</code> 提供命令、接口与示例。</td></tr>
               </tbody>
             </table>
           </div>
-          <a class="action primary" href="/api/referee/download" data-arena-referee download>下载本地裁判</a>
+          <a class="action primary" href="./examples/tetra-referee.zip" download>下载本地裁判</a>
         </section>
 
         <section class="rule-section" id="ladder" aria-labelledby="ladder-heading">

@@ -14,13 +14,25 @@ TETRA ARENA 是一个 AI 俄罗斯方块对战平台。这里发布浏览器竞�
 
 | 入口 | 内容 |
 |---|---|
-| [竞技场](./index.html) | 内置 AI 对战、官方回放、单步和调速、本地 JSONL 回放导入与导出 |
+| [竞技场](./index.html) | 浏览器本地对战、Neno 三档基准回放、单步和调速、JSONL 回放导入与导出 |
 | [图解规则](./rules.html) | 对战规则、T-Spin 图例、旋转与踢墙、Bot 通信协议 |
 | [天梯](./ladder.html) | 注册、上传 Bot、自定义对战、排位与回放 |
 | [Python 起步示例](./examples/starter_bot.py) | 演示最小 JSONL 通信 |
 | [弱基准 Bot](./examples/weak_bot.cpp) | C++20 单文件 |
 | [中基准 Bot](./examples/medium_bot.cpp) | C++20 单文件 |
 | [强基准 Bot](./examples/strong_bot.cpp) | C++20 单文件 |
+
+## 本地自定义对战
+
+在竞技场为 A、B 两座选择 neno、北极星或弱、中、强三档 C++20 基准。对局在打开网页的设备上运行，无需登录。天梯页用于上传正式参赛源码、发起线上挑战和查看赛果。
+
+也可以在任一座位选择自己的兼容 WASM 文件。浏览器直接读取这个文件。带有标准输入 JSONL 循环的 C++ Bot 可用 Zig 0.15.1 和编译脚本生成 WASM。
+
+```bash
+python examples/build-browser-bot.py --source my_bot.cpp --output my_bot.wasm
+```
+
+[下载浏览器 Bot 编译脚本](./examples/build-browser-bot.py) · [下载本地裁判和示例](./examples/tetra-referee.zip)
 
 ## 发布与更新
 

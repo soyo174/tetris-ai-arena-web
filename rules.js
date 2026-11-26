@@ -1,4 +1,4 @@
-import { createDuel, DEFAULT_RULES, geometry } from './engine.mjs';
+import { createDuel, DEFAULT_RULES, geometry } from './engine.mjs?v=0.5.3-local';
 import './api.mjs';
 
 const { cells, pivots, kicks_90: kicks90, kicks_180: kicks180 } = geometry();

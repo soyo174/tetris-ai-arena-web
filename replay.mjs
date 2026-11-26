@@ -1,4 +1,4 @@
-import {createDuel, DEFAULT_RULES, LEGACY_RULES, PREVIOUS_RULES, V3_RULES, V4_RULES, V5_RULES, V51_RULES, V52_RULES, choose} from './engine.mjs';
+import {createDuel, DEFAULT_RULES, LEGACY_RULES, PREVIOUS_RULES, V3_RULES, V4_RULES, V5_RULES, V51_RULES, V52_RULES, choose} from './engine.mjs?v=0.5.3-local';
 
 export const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
 export const MAX_SERVER_REPLAY_BYTES = 32 * 1024 * 1024;
@@ -16,6 +16,7 @@ const engineVersions = new Map([
   [V52_RULES.profile, '0.5.2'],
   [DEFAULT_RULES.profile, '0.5.3'],
 ]);
+export const CURRENT_ENGINE_VERSION = engineVersions.get(DEFAULT_RULES.profile);
 const copy = value => structuredClone(value);
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = value => Array.isArray(value) ? value.map(canonical) : isObject(value)
@@ -161,7 +162,7 @@ export async function playOfficialReplay({header, decisions, result}) {
 }
 
 /** Validate before exposing imported data to the controller or replacing a live match. */
-export async function validateReplay(text, {maxBytes = MAX_REPLAY_BYTES} = {}) {
+export async function validateReplay(text, {maxBytes = MAX_REPLAY_BYTES, currentOnly = false} = {}) {
   if (![MAX_REPLAY_BYTES, MAX_SERVER_REPLAY_BYTES].includes(maxBytes)) throw new Error('无效的回放大小限制。');
   if (typeof text !== 'string' || new TextEncoder().encode(text).byteLength > maxBytes) {
     throw new Error(`回放文件过大，请选择不超过 ${maxBytes / 1024 / 1024} MB 的 JSONL 文件。`);
@@ -175,6 +176,9 @@ export async function validateReplay(text, {maxBytes = MAX_REPLAY_BYTES} = {}) {
   if (!isObject(header) || header.type !== 'HEADER' || header.version !== 1
       || header.protocol !== 'tetris-duel-jsonl-v1') throw new Error('回放头格式或版本不受支持。');
   if (!Number.isSafeInteger(header.seed)) throw new Error('回放种子超出网页支持的整数范围（±9007199254740991）。');
+  if (currentOnly && header.rules?.profile !== DEFAULT_RULES.profile) {
+    throw new Error('该回放已归档。网页观战仅支持当前裁判 v' + CURRENT_ENGINE_VERSION + '。');
+  }
   const expectedVersion = engineVersions.get(header.rules?.profile);
   if (!expectedVersion || header.engine_version !== expectedVersion) {
     throw new Error('回放的裁判版本与规则版本不匹配或不受支持。');
