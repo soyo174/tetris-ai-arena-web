@@ -1,21 +1,30 @@
-"""TETRA ARENA deterministic baseline source; build the two standalone files.
-
-Only public observations are used. Search bounds and tie breaking are fixed;
-there is no random generator, clock cutoff, persistent state or external import.
-"""
+"""TETRA ARENA baseline source; build the two standalone files."""
 from collections import deque, namedtuple
 import json
 import sys
+from time import perf_counter
 
 LEVEL = 'medium'  # Generated from bots/baseline_core.py; edit the source and rebuild.
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 FULL = 1023
 Placement = namedtuple('Placement', 'rows solids lines spin perfect_clear commands')
 
 
+class SearchTimeout(Exception):
+    pass
+
+
+def one_ply(options):
+    if not options:
+        return -10**12, None, -10**12
+    value, placement, *_ = options[0]
+    return value, placement, value
+
+
 class Model:
-    def __init__(self, observation):
+    def __init__(self, observation, deadline=None):
         self.observation = observation
+        self.deadline = deadline
         self.rules = observation['rules']
         geometry = observation['geometry']
         self.cells = {p: tuple(tuple(tuple(c) for c in rotation) for rotation in values)
@@ -26,6 +35,10 @@ class Model:
                           for row in observation['self']['board'])
         self.solids = tuple(3 in row for row in observation['self']['board'])
         self.values = {}
+
+    def check_deadline(self):
+        if self.deadline is not None and perf_counter() >= self.deadline:
+            raise SearchTimeout
 
     def landings(self, piece, rows=None, solids=None, full=False):
         rows = self.rows if rows is None else rows
@@ -107,6 +120,7 @@ class Model:
             if len(set(cells)) == 1:
                 commands = ('LEFT', 'RIGHT', 'DOWN')
             while queue:
+                self.check_deadline()
                 pose, route = queue.popleft()
                 add(pose, route)
                 if len(route) >= self.rules['max_commands'] - 1:
@@ -118,6 +132,7 @@ class Model:
                         queue.append((moved, (*route, command)))
         else:
             for rotation in ((), ('CW',), ('ROT180',), ('CCW',)):
+                self.check_deadline()
                 rotated = step(start, rotation[0]) if rotation else start
                 for shift in range(-5, 6):
                     route = rotation + (('LEFT' if shift < 0 else 'RIGHT'),) * abs(shift)
@@ -198,6 +213,7 @@ class Model:
     def ranked(self, piece, combo, b2b, full):
         options = []
         for placement in self.landings(piece, full=full):
+            self.check_deadline()
             attack, next_combo, next_b2b = self.attack(placement, combo, b2b)
             reward = (120 * placement.lines + 25 * attack if LEVEL == 'medium'
                       else 45 * placement.lines + 160 * attack)
@@ -208,17 +224,14 @@ class Model:
         options.sort(key=lambda item: item[0], reverse=True)
         return options
 
-    def search(self, piece, combo, b2b, next_piece):
-        options = self.ranked(piece, combo, b2b, full=True)
-        if not options:
-            return -10**12, None, -10**12
-        if LEVEL != 'strong' or next_piece is None:
-            return options[0][0], options[0][1], options[0][0]
+    def search(self, options, next_piece, beam):
+        if not options or next_piece is None:
+            return one_ply(options)
         best = None
-        # Fixed beam width: runtime never changes the chosen policy.
-        for immediate, placement, reward, cost, next_combo, next_b2b in options[:8]:
+        for immediate, placement, reward, cost, next_combo, next_b2b in options[:beam]:
             future = -10**12
             for child in self.landings(next_piece, placement.rows, placement.solids):
+                self.check_deadline()
                 attack, _, _ = self.attack(child, next_combo, next_b2b)
                 value = self.board_value(child.rows, child.solids) + 36 * child.lines + 128 * attack
                 if value > future:
@@ -228,29 +241,63 @@ class Model:
                 best = total, placement, immediate
         return best
 
+    def plan(self):
+        own = self.observation['self']
+        combo, b2b = own['combo'], own['b2b']
+        alternative = (own['hold'] or own['next']) if own['can_hold'] else None
+        after_hold = own['next'] if own['hold'] is not None else None
+
+        def select(current, held):
+            value, placement, immediate = current
+            hold_value, hold_placement, _ = held
+            # An empty Hold hides the following piece, so use one-ply scores.
+            reference = immediate if after_hold is None else value
+            margin = 80 if LEVEL == 'medium' else (120 if after_hold is None else 45)
+            if hold_placement is not None and hold_value > reference + margin:
+                return 'HOLD', hold_placement.commands
+            return 'PLAY', placement.commands if placement is not None else ['HARD_DROP']
+
+        def ranked(full):
+            current = self.ranked(own['current'], combo, b2b, full)
+            held = self.ranked(alternative, combo, b2b, full) if alternative is not None else []
+            return current, held
+
+        best = 'PLAY', ['HARD_DROP']
+        try:
+            if self.deadline is not None:
+                current, held = ranked(False)
+                best = select(one_ply(current), one_ply(held))
+            current, held = ranked(True)
+            best = select(one_ply(current), one_ply(held))
+            if LEVEL == 'strong':
+                beam = 8 if self.deadline is None or self.deadline - perf_counter() > 0.1 else 4
+                best = select(self.search(current, own['next'], beam), self.search(held, after_hold, beam))
+        except SearchTimeout:
+            pass
+        return best
+
 
 def decide(observation):
-    own = observation['self']
-    model = Model(observation)
-    combo, b2b = own['combo'], own['b2b']
-    value, placement, immediate = model.search(own['current'], combo, b2b, own['next'])
-    if own['can_hold']:
-        alternative = own['hold'] if own['hold'] is not None else own['next']
-        next_piece = own['next'] if own['hold'] is not None else None
-        other, _, _ = model.search(alternative, combo, b2b, next_piece)
-        # With an empty Hold the following piece is hidden. Compare one-ply
-        # scores with a fixed uncertainty margin, never peek at the seed/bag.
-        reference = immediate if next_piece is None else value
-        margin = 80 if LEVEL == 'medium' else (120 if next_piece is None else 45)
-        if other > reference + margin:
-            return 'HOLD', None
-    return 'PLAY', placement.commands if placement is not None else ['HARD_DROP']
+    kind, commands = Model(observation).plan()
+    return kind, commands if kind == 'PLAY' else None
 
 
 def serve():
+    after_hold = None
     for line in sys.stdin:
+        started = perf_counter()
         request = json.loads(line)
-        kind, commands = decide(request['observation'])
+        observation = request['observation']
+        own = observation['self']
+        turn = observation['turn']
+        if after_hold and after_hold[:2] == (turn, own['current']) and not own['can_hold']:
+            kind, commands = 'PLAY', after_hold[2]
+        else:
+            remaining = request.get('remaining_ms')
+            # Reserve time for the protocol, scheduling and the PLAY after HOLD.
+            deadline = started + max(0, remaining - 12) / 1000 if type(remaining) is int else None
+            kind, commands = Model(observation, deadline).plan()
+        after_hold = (turn, own['hold'] or own['next'], commands) if kind == 'HOLD' else None
         response = {'type': kind, 'request_id': request['request_id']}
         if kind == 'PLAY':
             response['commands'] = commands

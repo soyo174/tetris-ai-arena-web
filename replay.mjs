@@ -1,9 +1,10 @@
-import {createDuel, DEFAULT_RULES, LEGACY_RULES, choose} from './engine.mjs';
+import {createDuel, DEFAULT_RULES, LEGACY_RULES, PREVIOUS_RULES, choose} from './engine.mjs';
 
 export const MAX_REPLAY_BYTES = 8 * 1024 * 1024;
 export const MAX_SERVER_REPLAY_BYTES = 32 * 1024 * 1024;
 const MAX_TURNS = 2000;
-const engineVersions = new Map([[LEGACY_RULES.profile, '0.1.0'], [DEFAULT_RULES.profile, '0.2.0']]);
+const engineVersions = new Map([[LEGACY_RULES.profile, '0.1.0'], [PREVIOUS_RULES.profile, '0.2.0'],
+  [DEFAULT_RULES.profile, '0.3.0']]);
 const copy = value => structuredClone(value);
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = value => Array.isArray(value) ? value.map(canonical) : isObject(value)

@@ -16,6 +16,7 @@ const signedFormat = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2, 
 const dateFormat = new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" });
 const statusLabels = { queued: "排队中", running: "对战中", completed: "已完成", failed: "未结算" };
 const offlineHint = "暂时无法连接比赛服务。仍可下载示例 Bot、阅读规则或观看官方回放。";
+const legacyLanguages = [{name: "Python 3", extension: ".py"}, {name: "JavaScript", extension: ".js"}];
 
 const state = {
   session: null,
@@ -33,11 +34,160 @@ let authMode = "login";
 let dialogTrigger = null;
 let rankingKey = null;
 let historyKey = null;
+let historyFilter = "all";
+let pendingOpponentId = null;
 
 class ApiError extends Error {
   constructor(message, status = 0) {
     super(message);
     this.status = status;
+  }
+}
+
+/* Workbench Tabs */
+const tabMap = {
+  upload: {tab: "tab-upload", pane: "upload"},
+  challenge: {tab: "tab-challenge", pane: "challenge-panel"},
+  practice: {tab: "tab-practice", pane: "custom-match"},
+};
+
+function switchTab(name, {focusPane = false} = {}) {
+  const target = tabMap[name] ? name : "upload";
+  for (const [key, ids] of Object.entries(tabMap)) {
+    const active = key === target;
+    const tabBtn = byId(ids.tab);
+    const pane = byId(ids.pane);
+    if (tabBtn) tabBtn.setAttribute("aria-selected", String(active));
+    if (pane) pane.hidden = !active;
+  }
+  if (focusPane) {
+    const pane = byId(tabMap[target].pane);
+    pane?.scrollIntoView({behavior: "smooth", block: "nearest"});
+  }
+}
+
+for (const button of document.querySelectorAll("[data-tab]")) {
+  button.addEventListener("click", () => switchTab(button.dataset.tab));
+}
+
+for (const link of document.querySelectorAll("[data-open-tab]")) {
+  link.addEventListener("click", event => {
+    event.preventDefault();
+    const tab = link.dataset.openTab;
+    switchTab(tab, {focusPane: true});
+    if (tab === "upload") byId("bot-name")?.focus();
+    else if (tab === "practice") byId("practice-a")?.focus();
+  });
+}
+
+function syncTabFromHash() {
+  if (location.hash === "#custom-match") switchTab("practice");
+  else if (location.hash === "#challenge-panel") switchTab("challenge");
+  else if (location.hash === "#upload") switchTab("upload");
+}
+window.addEventListener("hashchange", syncTabFromHash);
+syncTabFromHash();
+
+/* Drag-and-Drop File Inputs */
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KiB`;
+}
+
+function syncFileDisplay(inputId) {
+  const input = byId(inputId);
+  const status = byId(`${inputId}-status`);
+  const nameEl = byId(`${inputId}-name`);
+  if (!input || !status || !nameEl) return;
+  const file = input.files?.[0];
+  if (file) {
+    nameEl.textContent = `${file.name} (${formatBytes(file.size)})`;
+    status.hidden = false;
+  } else {
+    nameEl.textContent = "";
+    status.hidden = true;
+  }
+}
+
+for (const zone of document.querySelectorAll("[data-dropzone]")) {
+  const inputId = zone.dataset.dropzone;
+  const input = byId(inputId);
+  if (!input) continue;
+  input.addEventListener("change", () => syncFileDisplay(inputId));
+  zone.addEventListener("dragover", event => {
+    event.preventDefault();
+    zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("is-dragover"));
+  zone.addEventListener("drop", event => {
+    event.preventDefault();
+    zone.classList.remove("is-dragover");
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+    if (inputId === "bot-source" && !byId("bot-name").value.trim()) {
+      const stem = file.name.replace(/\.[^.]+$/, "").slice(0, 40);
+      if (stem) byId("bot-name").value = stem;
+    }
+  });
+}
+
+for (const clearBtn of document.querySelectorAll("[data-clear-file]")) {
+  clearBtn.addEventListener("click", () => {
+    const inputId = clearBtn.dataset.clearFile;
+    const input = byId(inputId);
+    if (!input) return;
+    input.value = "";
+    syncFileDisplay(inputId);
+  });
+}
+
+/* Swap A/B seats in custom match */
+if (byId("practice-swap")) {
+  byId("practice-swap").addEventListener("click", () => {
+    const aSelect = byId("practice-a"), bSelect = byId("practice-b");
+    [aSelect.value, bSelect.value] = [bSelect.value, aSelect.value];
+    const aFile = byId("practice-file-a"), bFile = byId("practice-file-b");
+    const aFiles = Array.from(aFile.files ?? []), bFiles = Array.from(bFile.files ?? []);
+    const dtA = new DataTransfer(), dtB = new DataTransfer();
+    bFiles.forEach(f => dtA.items.add(f));
+    aFiles.forEach(f => dtB.items.add(f));
+    aFile.files = dtA.files;
+    bFile.files = dtB.files;
+    syncFileDisplay("practice-file-a");
+    syncFileDisplay("practice-file-b");
+  });
+}
+
+function uploadLanguages() {
+  return Array.isArray(state.health?.languages) ? state.health.languages : legacyLanguages;
+}
+
+function sourceSizeLimit() {
+  return state.health?.limits?.source_bytes ?? 256 * 1024;
+}
+
+function sourceExtension(filename) {
+  return /\.[a-z]+$/i.exec(filename)?.[0].toLowerCase() ?? "";
+}
+
+function validSource(file) {
+  return file && file.size > 0 && file.size <= sourceSizeLimit() &&
+    uploadLanguages().some(({extension}) => extension === sourceExtension(file.name));
+}
+
+function sourceHelp() {
+  return `请选择一个受支持语言的非空 UTF-8 文件，大小不超过 ${numberFormat.format(sourceSizeLimit() / 1024)} KiB。`;
+}
+
+async function readSource(file) {
+  try {
+    return new TextDecoder("utf-8", {fatal: true}).decode(await file.arrayBuffer());
+  } catch {
+    throw new ApiError("无法读取源码，请选择 UTF-8 编码的文件。");
   }
 }
 
@@ -144,11 +294,12 @@ function recordResponse(key, response, select, save) {
 }
 
 function setText(node, value) {
-  if (node.textContent !== value) node.textContent = value;
+  if (node && node.textContent !== value) node.textContent = value;
 }
 
 function setMessage(id, message = "", tone = "") {
   const node = byId(id);
+  if (!node) return;
   setText(node, message);
   if (!node.classList.contains("form-feedback")) node.hidden = !message;
   node.dataset.tone = tone;
@@ -177,7 +328,7 @@ function updateHealth() {
   } else if (runner && !runner.available) {
     hint = `${runner.reason ? `${runner.reason} ` : ""}仍可上传，涉及上传或官方练习 Bot 的对局将等待 Docker 沙箱。`;
   } else if (state.health) {
-    hint = "排行榜与挑战记录会自动刷新。";
+    hint = "排行榜与挑战记录每 15 秒自动刷新。";
   }
   setText(byId("health-hint"), hint);
 }
@@ -200,11 +351,34 @@ function botLabel(bot) {
   return version ? `${bot.name} · ${version}` : bot.name;
 }
 
+function challengeOpponentQuick(bot) {
+  pendingOpponentId = String(bot.id);
+  switchTab("challenge", {focusPane: true});
+  if (state.session?.user) {
+    if (opponentSelect.querySelector(`option[value="${CSS.escape(pendingOpponentId)}"]`)) {
+      opponentSelect.value = pendingOpponentId;
+    }
+    if (!ownSelect.disabled) ownSelect.focus();
+    else setMessage("challenge-feedback", "请先上传至少一个 Bot 版本后再发起挑战。", "");
+  } else {
+    setMessage("challenge-feedback", `已为你预选对手 ${botLabel(bot)}，登录后即可发起挑战。`, "");
+    openAuth(byId("challenge-submit"));
+  }
+}
+
 function leaderboardRow(bot) {
+  const user = state.session?.user;
+  const isMine = Boolean(user && bot.owner_id === user.id);
   const row = make("tr");
   const ranked = bot.games > 0 && bot.rank != null;
-  const rank = make("td", "rank-value", ranked ? String(bot.rank) : "—");
-  if (ranked) rank.dataset.rank = String(bot.rank);
+  const rank = make("td", "rank-value");
+  if (ranked && bot.rank <= 3) {
+    const badge = make("span", "rank-badge", String(bot.rank));
+    badge.dataset.rank = String(bot.rank);
+    rank.append(badge);
+  } else {
+    rank.textContent = ranked ? String(bot.rank) : "—";
+  }
   if (!ranked) rank.setAttribute("aria-label", "未定级");
 
   const competitor = make("td");
@@ -216,6 +390,7 @@ function leaderboardRow(bot) {
   const title = make("div");
   title.append(make("strong", "", bot.name));
   if (bot.kind === "builtin") title.append(make("span", "official-badge", "官方"));
+  if (isMine) title.append(make("span", "mine-badge", "我的"));
   const details = [bot.kind === "builtin" ? "" : bot.owner, versionLabel(bot)].filter(Boolean);
   labels.append(title, make("div", "bot-meta", details.join(" · ")));
   tile.append(icon, labels);
@@ -224,10 +399,24 @@ function leaderboardRow(bot) {
   const rating = make("td", "numeric");
   rating.append(make("span", "rating-value", numberFormat.format(bot.rating)));
   if (!ranked) rating.append(make("div", "bot-unranked", "未定级"));
+
   const battles = make("td", "numeric");
   battles.append(make("span", "record-value", `${bot.wins} / ${bot.losses} / ${bot.draws}`));
-  battles.append(make("span", "record-meta", `${bot.games} 局`));
-  row.append(rank, competitor, rating, battles);
+  const winRate = bot.games > 0 ? ` · ${Math.round((bot.wins / bot.games) * 100)}% 胜率` : "";
+  battles.append(make("span", "record-meta", `${bot.games} 局${winRate}`));
+
+  const action = make("td", "numeric");
+  if (isMine) {
+    action.append(make("span", "row-own-tag", "己方"));
+  } else {
+    const btn = make("button", "row-challenge-btn", "挑战");
+    btn.type = "button";
+    btn.setAttribute("aria-label", `挑战 ${botLabel(bot)}`);
+    btn.addEventListener("click", () => challengeOpponentQuick(bot));
+    action.append(btn);
+  }
+
+  row.append(rank, competitor, rating, battles, action);
   return row;
 }
 
@@ -251,8 +440,9 @@ function renderLeaderboard() {
     if (error) message = `${error.message} 当前显示最近一次加载的数据。`;
   }
 
+  setText(byId("bot-count"), bots ? `${matches.length} / ${bots.length}` : "");
   setMessage("board-status", message);
-  const key = matches.length ? JSON.stringify(matches) : empty;
+  const key = JSON.stringify({user: state.session?.user?.id ?? null, matches, empty});
   if (key === rankingKey) return;
   rankingKey = key;
   if (matches.length) {
@@ -260,7 +450,7 @@ function renderLeaderboard() {
   } else {
     const row = make("tr");
     const cell = make("td");
-    cell.colSpan = 4;
+    cell.colSpan = 5;
     cell.append(make("p", "empty-state", empty));
     row.append(cell);
     rankingRows.replaceChildren(row);
@@ -281,7 +471,7 @@ function replayLinks(challenge) {
     const info = make("span", "game-result", `第 ${index + 1} 局 · ${result} · ${game.turns} 回合`);
     info.append(make("span", "game-seats", `A 座 ${seats[0]} · B 座 ${seats[1]}`));
     link.append(info);
-    link.append(make("span", "game-action", "观看回放"));
+    link.append(make("span", "game-action", "观看回放 →"));
     item.append(link);
     games.append(item);
   });
@@ -298,7 +488,7 @@ function challengeItem(challenge) {
   head.append(names, badge);
 
   const meta = make("div", "challenge-meta");
-  if (challenge.practice) meta.append(make("span", "", "自定义对战 · 不计分"));
+  if (challenge.practice) meta.append(make("span", "practice-tag", "自定义对战"));
   const date = new Date(challenge.created_at);
   if (challenge.created_at && !Number.isNaN(date.getTime())) {
     const time = make("time", "", dateFormat.format(date));
@@ -307,14 +497,13 @@ function challengeItem(challenge) {
   }
   if (Number.isFinite(challenge.seed)) meta.append(make("span", "", `种子 ${challenge.seed}`));
   if (Number.isFinite(challenge.score_a)) {
-    // score_a is the total for both legs, from zero to two.
     const points = challenge.score_a;
     meta.append(make("strong", "series-score", `${numberFormat.format(points)} : ${numberFormat.format(2 - points)}`));
   }
   if (challenge.rated && Number.isFinite(challenge.rating_delta_a)) {
     const delta = challenge.rating_delta_a;
     for (const [bot, change] of [[challenge.a, delta], [challenge.b, -delta]]) {
-      const amount = make("span", "rating-change", `${botLabel(bot)} Elo ${signedFormat.format(change || 0)}`);
+      const amount = make("span", "rating-change", `${botLabel(bot)} ${signedFormat.format(change || 0)}`);
       amount.dataset.sign = change > 0 ? "positive" : change < 0 ? "negative" : "neutral";
       meta.append(amount);
     }
@@ -328,21 +517,44 @@ function challengeItem(challenge) {
   return item;
 }
 
+function matchesHistoryFilter(challenge) {
+  if (historyFilter === "all") return true;
+  if (historyFilter === "active") return challenge.status === "queued" || challenge.status === "running";
+  if (historyFilter === "completed") return challenge.status === "completed";
+  if (historyFilter === "practice") return Boolean(challenge.practice);
+  if (historyFilter === "failed") return challenge.status === "failed";
+  return true;
+}
+
+for (const pill of document.querySelectorAll("[data-history-filter]")) {
+  pill.addEventListener("click", () => {
+    historyFilter = pill.dataset.historyFilter;
+    for (const btn of document.querySelectorAll("[data-history-filter]")) {
+      btn.setAttribute("aria-pressed", String(btn === pill));
+    }
+    historyKey = null;
+    renderHistory();
+  });
+}
+
 function renderHistory() {
   const records = state.challenges;
   const error = state.errors.challenges;
+  const filtered = records ? records.filter(matchesHistoryFilter) : [];
   let empty = "挑战记录载入中…";
-  if (records) empty = "暂无挑战。上传 Bot 后可在这里查看进度。";
+  if (records) {
+    empty = records.length ? "当前筛选条件下没有挑战记录。" : "暂无挑战。上传 Bot 或发起自定义对战后可在这里查看进度。";
+  }
   if (error && !records) empty = "接通天梯服务后，挑战与回放会在这里显示。";
   const message = error && records ? `${error.message} 当前显示最近一次加载的数据。` : error && state.health ? error.message : "";
   setMessage("history-status", message);
 
-  const key = records?.length ? JSON.stringify(records) : empty;
+  const key = filtered.length ? JSON.stringify(filtered) : `${historyFilter}:${empty}`;
   if (key === historyKey || historyList.contains(document.activeElement)) return;
   historyKey = key;
-  setMessage("history-empty", records?.length ? "" : empty);
-  historyList.hidden = !records?.length;
-  historyList.replaceChildren(...(records ?? []).map(challengeItem));
+  setMessage("history-empty", filtered.length ? "" : empty);
+  historyList.hidden = !filtered.length;
+  historyList.replaceChildren(...filtered.map(challengeItem));
 }
 
 function setOptions(select, placeholder, bots, label = botLabel) {
@@ -360,10 +572,12 @@ function setOptions(select, placeholder, bots, label = botLabel) {
 function renderControls() {
   const user = state.session?.user;
   const accountName = byId("account-name");
+  const accountPill = byId("account-pill");
   byId("account-open").hidden = Boolean(user);
   byId("account-logout").hidden = !user;
   byId("account-logout").disabled = Boolean(state.pending);
   accountName.hidden = !user;
+  if (accountPill) accountPill.hidden = !user;
   setText(accountName, user?.username ?? "");
 
   const bots = user ? (state.myBots ?? []) : [];
@@ -371,7 +585,11 @@ function renderControls() {
   let ownPlaceholder = "登录后选择 Bot";
   if (user) ownPlaceholder = bots.length ? "选择 Bot 版本" : state.errors.mine ? "暂时无法加载 Bot" : state.myBots ? "请先上传 Bot" : "正在加载 Bot…";
   setOptions(ownSelect, ownPlaceholder, bots);
-  setOptions(opponentSelect, "自动配对", opponents, bot => `${botLabel(bot)} · ${bot.kind === "builtin" ? "官方" : bot.owner}`);
+  setOptions(opponentSelect, "自动配对（推荐）", opponents, bot => `${botLabel(bot)} · ${bot.kind === "builtin" ? "官方" : bot.owner}`);
+  if (pendingOpponentId && opponentSelect.querySelector(`option[value="${CSS.escape(pendingOpponentId)}"]`)) {
+    opponentSelect.value = pendingOpponentId;
+    pendingOpponentId = null;
+  }
   ownSelect.disabled = !bots.length;
   opponentSelect.disabled = !bots.length;
 
@@ -383,13 +601,19 @@ function renderControls() {
     if (user) control.removeAttribute("aria-haspopup");
     else control.setAttribute("aria-haspopup", "dialog");
   }
-  setText(upload, state.pending === "upload" ? "正在上传…" : user ? "上传并排队" : "登录后上传");
+  setText(upload, state.pending === "upload" ? "正在上传…" : user ? "上传并自动排队" : "登录后上传");
   setText(challenge, state.pending === "challenge" ? "正在提交…" : user ? "发起挑战" : "登录后挑战");
+  const languages = uploadLanguages();
+  const accept = languages.map(({extension}) => extension).join(",");
+  byId("bot-source").accept = accept;
+  setText(byId("source-help"), sourceHelp());
+  setText(byId("source-languages"), languages.map(({name, extension}) => `${name} (${extension})`).join("、"));
   const practiceBots = [...(state.health?.practice_bots ?? []), ...bots];
   for (const {select, file} of practiceSeats) {
-    setOptions(select, "选择官方 Bot 或我的版本", practiceBots);
+    setOptions(select, "选择官方或我的 Bot", practiceBots);
     select.disabled = Boolean(state.pending);
     file.disabled = Boolean(state.pending);
+    file.accept = accept;
   }
   const practice = byId("practice-submit");
   practice.disabled = Boolean(state.pending);
@@ -401,9 +625,12 @@ function updateAuthMode(mode) {
   const registering = mode === "register";
   setText(byId("account-title"), registering ? "注册天梯账号" : "登录天梯");
   setText(byId("account-description"), registering ? "创建账号后可管理你上传的 Bot 版本。" : "登录后可上传 Bot 和发起挑战。");
-  setText(byId("account-submit"), registering ? "注册" : "登录");
-  setText(byId("account-switch"), registering ? "已有账号？登录" : "没有账号？注册");
+  setText(byId("account-submit"), registering ? "创建账号并登录" : "登录");
+  setText(byId("account-switch"), registering ? "已有账号？切换到登录" : "没有账号？立即注册");
   byId("account-password").autocomplete = registering ? "new-password" : "current-password";
+  for (const tab of document.querySelectorAll("[data-auth-mode]")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.authMode === mode));
+  }
   setMessage("account-feedback");
 }
 
@@ -447,8 +674,39 @@ byId("account-switch").addEventListener("click", () => {
   updateAuthMode(authMode === "login" ? "register" : "login");
   byId("account-username").focus();
 });
+for (const tab of document.querySelectorAll("[data-auth-mode]")) {
+  tab.addEventListener("click", () => {
+    updateAuthMode(tab.dataset.authMode);
+    byId("account-username").focus();
+  });
+}
+
+// Click outside account dialog backdrop to close
+accountDialog.addEventListener("click", event => {
+  if (event.target === accountDialog) {
+    const r = accountDialog.getBoundingClientRect();
+    if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) {
+      accountDialog.close();
+    }
+  }
+});
+
+// Password visibility toggle
+if (byId("password-toggle")) {
+  byId("password-toggle").addEventListener("click", () => {
+    const input = byId("account-password");
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    byId("password-toggle").textContent = showing ? "显示" : "隐藏";
+    byId("password-toggle").setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
+  });
+}
+
 accountDialog.addEventListener("close", () => {
-  byId("account-password").value = "";
+  const pw = byId("account-password");
+  pw.value = "";
+  pw.type = "password";
+  if (byId("password-toggle")) byId("password-toggle").textContent = "显示";
   const target = dialogTrigger?.hidden ? byId("account-logout") : dialogTrigger;
   target?.focus();
 });
@@ -471,7 +729,7 @@ byId("account-form").addEventListener("submit", async event => {
     setMessage("page-feedback");
     accountDialog.close();
   });
-  setText(submit, mode === "register" ? "注册" : "登录");
+  setText(submit, mode === "register" ? "创建账号并登录" : "登录");
   submit.disabled = false;
   changeMode.disabled = false;
 });
@@ -500,32 +758,29 @@ uploadForm.addEventListener("submit", event => {
   const draftName = nameInput.value;
   const name = draftName.trim();
   const file = fileInput.files[0];
-  const limit = state.health?.limits?.source_bytes ?? 65_536;
   if (!name) {
     setMessage("upload-feedback", "请填写 Bot 名称。", "error");
     nameInput.focus();
     return;
   }
-  if (!file || !/\.(py|js)$/.test(file.name) || file.size < 1 || file.size > limit) {
-    setMessage("upload-feedback", `请选择一个非空的 .py 或 .js 文件，大小不能超过 ${numberFormat.format(limit / 1024)} KiB。`, "error");
+  if (!validSource(file)) {
+    setMessage("upload-feedback", sourceHelp(), "error");
     fileInput.focus();
     return;
   }
 
   void mutate("upload", "upload-feedback", async () => {
-    let source;
-    try {
-      source = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
-    } catch {
-      throw new ApiError("无法读取源码，请选择 UTF-8 编码的 .py 文件。");
-    }
+    const source = await readSource(file);
     const result = await request("/api/bots", { name, filename: file.name, source });
     state.myBots = [result.bot, ...(state.myBots ?? []).filter(bot => bot.id !== result.bot.id)];
     if (state.leaderboard && !state.leaderboard.some(bot => bot.id === result.bot.id)) state.leaderboard.push(result.bot);
     if (result.challenge) cacheNewChallenge(result.challenge);
-    if (nameInput.value === draftName && fileInput.files[0] === file) uploadForm.reset();
+    if (nameInput.value === draftName && fileInput.files[0] === file) {
+      uploadForm.reset();
+      syncFileDisplay("bot-source");
+    }
     const label = botLabel(result.bot);
-    const message = result.challenge ? `已保存 ${label}，首组挑战已排队。` : result.warning || `已保存 ${label}。你可以从下方发起挑战。`;
+    const message = result.challenge ? `已保存 ${label}，首组挑战已排队。` : result.warning || `已保存 ${label}。你可以切换到“发起挑战”指定对手。`;
     setMessage("upload-feedback", message, result.challenge ? "success" : "");
   });
 });
@@ -561,31 +816,34 @@ byId("practice-form").addEventListener("submit", event => {
     setMessage("practice-feedback", "请给两个座位各选一个 Bot 或上传一个文件。", "error");
     return;
   }
-  const limit = state.health?.limits?.source_bytes ?? 65_536;
-  if (entries.some(({source}) => source && (!/\.(py|js)$/.test(source.name) || !source.size || source.size > limit))) {
-    setMessage("practice-feedback", "每个座位可上传一个不超过 64 KiB 的 .py 或 .js 文件。", "error");
+  if (entries.some(({source}) => source && !validSource(source))) {
+    setMessage("practice-feedback", sourceHelp(), "error");
     return;
   }
   void mutate("practice", "practice-feedback", async () => {
+    const drafts = await Promise.all(entries.map(async entry => ({
+      ...entry, text: entry.source ? await readSource(entry.source) : null,
+    })));
     const ids = [];
-    for (const {select, file, source} of entries) {
+    for (const {select, file, source, text} of drafts) {
       if (!source) {
         ids.push(select.value);
         continue;
       }
-      const name = source.name.replace(/\.(py|js)$/, "").trim().slice(0, 40) || "Bot";
+      const name = source.name.slice(0, -sourceExtension(source.name).length).trim().slice(0, 40) || "Bot";
       const {bot} = await request("/api/bots", {
-        name, filename: source.name, source: await source.text(), auto_challenge: false,
+        name, filename: source.name, source: text, auto_challenge: false,
       });
       state.myBots = [bot, ...(state.myBots ?? [])];
       renderControls();
       select.value = bot.id;
       file.value = "";
+      syncFileDisplay(file.id);
       ids.push(bot.id);
     }
     const {challenge} = await request("/api/practice", {a_id: ids[0], b_id: ids[1]});
     cacheNewChallenge(challenge);
-    setMessage("practice-feedback", "对局已排队。完成后可从近期挑战观看回放。", "success");
+    setMessage("practice-feedback", "对局已排队。完成后可从左侧近期挑战观看回放。", "success");
   });
 });
 

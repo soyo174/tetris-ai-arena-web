@@ -2,8 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta name="tetra-api-base" content="https://129.204.38.227/tetra-arena/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#080d19">
+  <meta name="theme-color" content="#070b14">
   <meta name="description" content="TETRA ARENA 双人对战完整规则，含棋盘图解、全部旋转偏移、Bot 协议和天梯计分。">
   <title>完整对战规则 · TETRA ARENA</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
@@ -15,26 +16,30 @@
   <header class="site-header">
     <div class="shell header-inner">
       <a class="brand" href="./index.html" aria-label="TETRA ARENA 竞技场">
-        <img src="./favicon.svg" width="44" height="44" alt="">
+        <img src="./favicon.svg" width="38" height="38" alt="">
         <span><strong lang="en">TETRA ARENA</strong><small>AI 方块竞技场</small></span>
       </a>
-      <nav class="site-nav" aria-label="站点导航">
+      <nav class="site-nav" aria-label="主导航">
         <a href="./ladder.html">天梯</a>
         <a href="./index.html">观战</a>
         <a href="./rules.html" aria-current="page">规则</a>
       </nav>
+      <div class="header-actions">
+        <a class="action secondary action-sm" href="./examples/starter_bot.py" download>下载起步 Bot</a>
+      </div>
     </div>
   </header>
 
   <main class="shell">
     <header class="hero">
       <div class="hero-copy">
-        <p class="hero-profile"><span>双人单挑</span><code>v0.2.0</code></p>
+        <p class="hero-profile"><span>双人单挑</span><code>v0.3.0</code></p>
         <h1>完整对战规则</h1>
         <p>两名 Bot 每回合各落一块。用消行抵消来袭垃圾、向对手发动攻击。最后存活的一方获胜，同回合双方出局记平局。</p>
         <div class="hero-actions">
-          <a class="action primary" href="#board">从棋盘开始 </a>
-          <a class="action secondary" href="#protocol">Bot 接入 </a>
+          <a class="action primary" href="#board">从棋盘开始</a>
+          <a class="action secondary" href="#protocol">Bot 接入协议</a>
+          <a class="action secondary" href="./index.html">前往观战 →</a>
         </div>
       </div>
       <div class="hero-art" id="hero-art" aria-hidden="true"></div>
@@ -98,7 +103,7 @@
             <a class="section-link" href="#turn" aria-label="回合与指令的链接">#</a>
           </div>
           <ol class="steps">
-            <li><strong>观察与计时</strong><p>双方各获得相同且独立的思考额度，从裁判送达观察后开始计时。余时每回合重置，裁判生成和送达观察、处理回复及等待对手的时间均排除。</p></li>
+            <li><strong>观察与计时</strong><p>每个 Bot 每局首回合有 1000 ms，之后每回合有 50 ms。裁判送达观察后开始计时，余时每回合重置。编译、裁判处理和等待对手的时间另计。</p></li>
             <li><strong>可以先暂存</strong><p>单独回复 <code>HOLD</code>，交换立即生效。收到刷新观察后继续作答，前后共享本回合的思考额度。</p></li>
             <li><strong>提交完整走法</strong><p>回复 <code>PLAY</code>，给出一串动作，唯一的 <code>HARD_DROP</code> 必须在末尾。触底后仍可横移或旋转。</p></li>
             <li><strong>执行、锁定和计算攻击</strong><p>裁判依次执行合法动作。被墙、地板、顶边或已锁定方块挡住的动作直接跳过。硬降到底并立即锁定，随后判旋消、清行、算攻击。</p></li>
@@ -263,11 +268,16 @@
             <a class="section-link" href="#protocol" aria-label="Bot 通信协议的链接">#</a>
           </div>
           <div class="starter">
-            <p><strong>下载 Python 示例 Bot</strong><span>起步示例与弱、中、强三个档位均可直接上传天梯。</span></p>
-            <a class="action primary" href="./examples/starter_bot.py" download>起步 Bot</a>
-            <a class="action secondary" href="./examples/weak_bot.py" download>弱基准 Bot</a>
-            <a class="action secondary" href="./examples/medium_bot.py" download>中基准 Bot</a>
-            <a class="action secondary" href="./examples/strong_bot.py" download>强基准 Bot</a>
+            <div class="starter-info">
+              <strong>下载 Python 示例 Bot</strong>
+              <span>起步示例与弱、中、强三个档位均可直接上传天梯。</span>
+            </div>
+            <div class="starter-links">
+              <a class="action primary action-sm" href="./examples/starter_bot.py" download>起步 Bot</a>
+              <a class="action secondary action-sm" href="./examples/weak_bot.py" download>弱基准 Bot</a>
+              <a class="action secondary action-sm" href="./examples/medium_bot.py" download>中基准 Bot</a>
+              <a class="action secondary action-sm" href="./examples/strong_bot.py" download>强基准 Bot</a>
+            </div>
           </div>
           <p><code>tetris-duel-jsonl-v1</code> 用 UTF-8 JSONL 通过标准输入输出通信。每条消息恰好一个 JSON 对象，以换行结尾。读到 <code>OBSERVE</code> 后，用同一个字符串 <code>request_id</code> 回复一次，输出后立即刷新。标准输出留给协议消息，调试信息可写标准错误。</p>
           <div class="table-scroll" role="region" aria-label="观察消息字段" tabindex="0">
@@ -323,7 +333,7 @@
                 <tr><th scope="row">已确认</th><td>单挑规则</td><td>棋盘、独立七袋、单手暂存、同步结算、旋消、攻击、垃圾预警、实心底层与出局机制。</td></tr>
                 <tr><th scope="row">已确认</th><td>T 块出生</td><td>第 21 行第 4～6 列与第 22 行第 5 列。</td></tr>
                 <tr><th scope="row">试玩值</th><td>加时安排</td><td>第 <strong>210</strong> 回合结束首次升起，之后每 <strong>10</strong> 回合一行。</td></tr>
-                <tr><th scope="row">临时配置</th><td>每手思考时间</td><td><strong>1000 ms</strong>，暂存前后共用。</td></tr>
+                <tr><th scope="row">已确认</th><td>每手思考时间</td><td>首回合 <strong>1000 ms</strong>，之后每回合 <strong>50 ms</strong>，暂存前后共用。</td></tr>
                 <tr><th scope="row">临时配置</th><td>走法 / 输出上限</td><td><strong>512</strong> 条指令（含硬降），每条回复最多 <strong>65,536</strong> 字节（含换行）。</td></tr>
                 <tr><th scope="row">临时配置</th><td>几何与通信</td><td>完整出生表、朝向与旋转中心、90° / 180° 偏移、JSONL 字段和指令拼写以默认配置为准。</td></tr>
                 <tr><th scope="row">临时配置</th><td>含程序失误的同时出局</td><td><code>draw</code>（平局）。</td></tr>

@@ -13,7 +13,7 @@ function deepFreeze(value) {
   return value;
 }
 
-export const DEFAULT_RULES = deepFreeze({
+export const PREVIOUS_RULES = deepFreeze({
   profile: 'reference-provisional-v2',
   width: WIDTH, height: HEIGHT, main_height: 20,
   normal_attack: [0, 0, 1, 2, 4], tspin_attack: [0, 2, 4, 6],
@@ -24,7 +24,10 @@ export const DEFAULT_RULES = deepFreeze({
   kicks_180: [[0,0], [-1,0], [1,0], [0,1], [0,2]], kicks_90_override: {}
 });
 
-export const LEGACY_RULES = deepFreeze({...DEFAULT_RULES, profile: 'reference-provisional-v1'});
+export const LEGACY_RULES = deepFreeze({...PREVIOUS_RULES, profile: 'reference-provisional-v1'});
+export const DEFAULT_RULES = deepFreeze({...PREVIOUS_RULES, profile: 'reference-provisional-v3',
+  first_think_ms: 1000, think_ms: 50});
+const ruleProfiles = [LEGACY_RULES, PREVIOUS_RULES, DEFAULT_RULES];
 
 const spawnCells = {
   T: [[0,1],[1,1],[2,1],[1,2]], J: [[0,1],[1,1],[2,1],[0,2]],
@@ -443,7 +446,7 @@ class Duel {
           future.push({lines, due: w.due, hole: w.hole});
         } else {
           record.risen += lines;
-          if (rise(p.board, lines, w.hole, this.rules.profile === DEFAULT_RULES.profile)) {
+          if (rise(p.board, lines, w.hole, this.rules.profile !== LEGACY_RULES.profile)) {
             record.reasons.push('garbage_overflow');
           }
         }
@@ -490,9 +493,9 @@ class Duel {
 
 export async function createDuel(seed, rules = DEFAULT_RULES) {
   if (!Number.isSafeInteger(seed)) throw Error('seed must be a safe integer');
-  const supported = rules?.profile === LEGACY_RULES.profile ? LEGACY_RULES : DEFAULT_RULES;
-  if (!rules || (rules !== supported && canonical(rules) !== canonical(supported))) {
-    throw Error('网页仅支持 v1 和 v2 的默认规则配置。');
+  const supported = ruleProfiles.find(profile => profile.profile === rules?.profile);
+  if (!supported || (rules !== supported && canonical(rules) !== canonical(supported))) {
+    throw Error('网页仅支持 v1、v2 和 v3 的默认规则配置。');
   }
   const isLegacy = supported === LEGACY_RULES;
   const domains = isLegacy ? ['pieces-v1'] : ['pieces-v2:0', 'pieces-v2:1'];

@@ -18,7 +18,7 @@
 | [中基准 Bot](./examples/medium_bot.py) | 中档策略示例 |
 | [强基准 Bot](./examples/strong_bot.py) | 较强搜索策略示例 |
 
-公开测试期间，网页直接连接 TETRA ARENA 比赛 API。注册、上传 Python 或 JavaScript Bot、自定义对战和共享 Elo 排行榜均可在 GitHub Pages 上使用。官方回放也可独立浏览。
+公开测试期间，网页直接连接 TETRA ARENA 比赛 API。天梯支持 27 种语言，每次提交一个不超过 256 KiB 的 UTF-8 源文件。每局首回合限时 1000 ms，随后每回合限时 50 ms。注册、自定义对战、Elo 排行榜和回放均可在 GitHub Pages 上使用。
 
 ## 发布与更新
 

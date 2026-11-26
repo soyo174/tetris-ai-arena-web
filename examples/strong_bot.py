@@ -1,22 +1,29 @@
-"""TETRA ARENA strong deterministic baseline: settlement-aware Hold planning.
+"""TETRA ARENA strong baseline: settlement-aware Hold planning.
 
-Only public observations are used. Search bounds and tie breaking are fixed;
-there is no random generator, clock cutoff, persistent state or external import.
+Only public observations are used. The online search returns a completed plan
+before its deadline; untimed analysis uses fixed bounds and tie breaking.
 """
 from collections import deque, namedtuple
 import json
 import sys
+from time import perf_counter
 
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 FULL = 1023
 Placement = namedtuple('Placement', 'rows solids lines spin perfect_clear commands')
 Forecast = namedtuple('Forecast', 'rows solids warnings alive spawnable overflow')
 Choice = namedtuple('Choice', 'piece held placement forecast combo b2b hold reward value')
+RootChoice = namedtuple('RootChoice', 'placement held next_piece hold forecast combo b2b reward value')
+
+
+class SearchTimeout(Exception):
+    pass
 
 
 class Model:
-    def __init__(self, observation):
+    def __init__(self, observation, deadline=None):
         self.observation = observation
+        self.deadline = deadline
         self.rules = observation['rules']
         geometry = observation['geometry']
         self.cells = {p: tuple(tuple(tuple(c) for c in rotation) for rotation in values)
@@ -42,6 +49,10 @@ class Model:
                 masks[row] = masks.get(row, 0) | (1 << col)
             self.spawn_masks.append(tuple(masks.items()) if valid else None)
             self.spawn_bits[piece] = 1 << index
+
+    def check_deadline(self):
+        if self.deadline is not None and perf_counter() >= self.deadline:
+            raise SearchTimeout
 
     def landings(self, piece, rows=None, solids=None, full=False):
         rows = self.rows if rows is None else rows
@@ -135,6 +146,7 @@ class Model:
             if len(set(cells)) == 1:
                 commands = ('LEFT', 'RIGHT', 'DOWN')
             while queue:
+                self.check_deadline()
                 pose, route = queue.popleft()
                 add(pose, route)
                 if len(route) >= self.rules['max_commands'] - 1:
@@ -146,6 +158,7 @@ class Model:
                         queue.append((moved, (*route, command)))
         else:
             for rotation in ((), ('CW',), ('ROT180',), ('CCW',)):
+                self.check_deadline()
                 rotated = step(start, rotation[0]) if rotation else start
                 for shift in range(-5, 6):
                     route = rotation + (('LEFT' if shift < 0 else 'RIGHT'),) * abs(shift)
@@ -272,6 +285,7 @@ class Model:
             sources.append((held, True, current))
         for piece, use_hold, after_hold in sources:
             for placement in self.landings(piece, state.rows, state.solids, full):
+                self.check_deadline()
                 attack, next_combo, next_b2b = self.attack(placement, combo, b2b)
                 following = self.forecast(placement, attack, None, turn, state.warnings)
                 reward = 45 * placement.lines + 160 * attack
@@ -288,6 +302,7 @@ class Model:
             return self.state_value(child.forecast, child.combo, child.b2b)
         best = -10**12
         for placement in self.landings(child.hold, child.forecast.rows, child.forecast.solids):
+            self.check_deadline()
             attack, combo, b2b = self.attack(placement, child.combo, child.b2b)
             future = self.forecast(placement, attack, None, turn, child.forecast.warnings)
             value = self.state_value(future, combo, b2b) + (45 * placement.lines + 160 * attack) // 2
@@ -295,7 +310,23 @@ class Model:
                 best = value
         return best
 
-    def choose(self):
+    def root_choices(self, branches, full):
+        own = self.observation['self']
+        roots = []
+        for piece, use_hold, next_piece, stored in branches:
+            candidates = []
+            for placement in self.landings(piece, full=full):
+                self.check_deadline()
+                attack, combo, b2b = self.attack(placement, own['combo'], own['b2b'])
+                state = self.forecast(placement, attack, next_piece)
+                reward = 45 * placement.lines + 160 * attack
+                value = self.state_value(state, combo, b2b) + reward
+                candidates.append(RootChoice(placement, use_hold, next_piece, stored, state, combo, b2b, reward, value))
+            candidates.sort(key=lambda candidate: candidate.value, reverse=True)
+            roots.extend(candidates[:6 if len(branches) == 2 else 12])
+        return roots
+
+    def plan(self):
         own = self.observation['self']
         turn = self.observation['turn']
         branches = [(own['current'], False, own['next'], own['hold'])]
@@ -303,40 +334,47 @@ class Model:
             alternative = own['hold'] if own['hold'] is not None else own['next']
             if alternative != own['current']:
                 branches.append((alternative, True, own['next'] if own['hold'] is not None else None, own['current']))
-        roots = []
-        for piece, use_hold, next_piece, stored in branches:
-            candidates = []
-            for placement in self.landings(piece, full=True):
-                attack, combo, b2b = self.attack(placement, own['combo'], own['b2b'])
-                state = self.forecast(placement, attack, next_piece)
-                reward = 45 * placement.lines + 160 * attack
-                value = self.state_value(state, combo, b2b) + reward
-                candidates.append((value, placement, use_hold, next_piece, stored, state, combo, b2b, reward))
-            candidates.sort(key=lambda candidate: candidate[0], reverse=True)
-            roots.extend(candidates[:6 if len(branches) == 2 else 12])
-        if not roots:
-            return 'PLAY', ['HARD_DROP']
-        preliminary = []
-        for candidate in roots:
-            immediate, placement, use_hold, next_piece, stored, state, combo, b2b, reward = candidate
-            children = self.second_choices(state, next_piece, stored, combo, b2b, turn + 1)
-            value = children[0].value + reward if children else immediate - 10**10
-            preliminary.append((value, candidate))
-        preliminary.sort(key=lambda candidate: candidate[0], reverse=True)
         best = None
-        for _, candidate in preliminary[:3]:
-            immediate, placement, use_hold, next_piece, stored, state, combo, b2b, reward = candidate
-            children = self.second_choices(state, next_piece, stored, combo, b2b, turn + 1, full=True)
-            value = immediate - 10**10
-            for child in children[:4]:
-                score = self.tail_value(child, turn + 2) + reward + 3 * child.reward // 4
-                if score > value:
-                    value = score
-            # On equal values prefer keeping Hold; route order stays stable.
-            selection = value, not use_hold
-            if best is None or selection > best[0]:
-                best = selection, use_hold, placement
-        return ('HOLD', None) if best[1] else ('PLAY', best[2].commands)
+        try:
+            if self.deadline is not None:
+                quick = self.root_choices(branches, full=False)
+                best = max(quick, key=lambda candidate: (candidate.value, not candidate.held), default=None)
+            roots = self.root_choices(branches, full=True)
+            if roots:
+                if self.deadline is not None:
+                    roots.sort(key=lambda candidate: (candidate.value, not candidate.held), reverse=True)
+                best = max(roots, key=lambda candidate: (candidate.value, not candidate.held))
+            preliminary = []
+            best_value = None
+            for candidate in roots:
+                children = self.second_choices(candidate.forecast, candidate.next_piece, candidate.hold,
+                                               candidate.combo, candidate.b2b, turn + 1)
+                value = children[0].value + candidate.reward if children else candidate.value - 10**10
+                preliminary.append((value, candidate))
+                if best_value is None or value > best_value:
+                    best, best_value = candidate, value
+            preliminary.sort(key=lambda candidate: candidate[0], reverse=True)
+            best_score = None
+            for _, candidate in preliminary[:3]:
+                children = self.second_choices(candidate.forecast, candidate.next_piece, candidate.hold,
+                                               candidate.combo, candidate.b2b, turn + 1, full=True)
+                value = candidate.value - 10**10
+                for child in children[:4]:
+                    score = self.tail_value(child, turn + 2) + candidate.reward + 3 * child.reward // 4
+                    value = max(value, score)
+                # On equal values prefer keeping Hold; route order stays stable.
+                selection = value, not candidate.held
+                if best_score is None or selection > best_score:
+                    best, best_score = candidate, selection
+        except SearchTimeout:
+            pass
+        if best is None:
+            return 'PLAY', ['HARD_DROP']
+        return ('HOLD' if best.held else 'PLAY'), best.placement.commands
+
+    def choose(self):
+        kind, commands = self.plan()
+        return kind, commands if kind == 'PLAY' else None
 
 
 def decide(observation):
@@ -344,9 +382,21 @@ def decide(observation):
 
 
 def serve():
+    after_hold = None
     for line in sys.stdin:
+        started = perf_counter()
         request = json.loads(line)
-        kind, commands = decide(request['observation'])
+        observation = request['observation']
+        own = observation['self']
+        turn = observation['turn']
+        if after_hold and after_hold[:2] == (turn, own['current']) and not own['can_hold']:
+            kind, commands = 'PLAY', after_hold[2]
+        else:
+            remaining = request.get('remaining_ms')
+            # Reserve time for the protocol, scheduling and the PLAY after HOLD.
+            deadline = started + max(0, remaining - 12) / 1000 if type(remaining) is int else None
+            kind, commands = Model(observation, deadline).plan()
+        after_hold = (turn, own['hold'] or own['next'], commands) if kind == 'HOLD' else None
         response = {'type': kind, 'request_id': request['request_id']}
         if kind == 'PLAY':
             response['commands'] = commands

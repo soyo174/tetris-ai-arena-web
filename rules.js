@@ -3,9 +3,9 @@ import { createDuel, DEFAULT_RULES, geometry } from './engine.mjs';
 const { cells, pivots, kicks_90: kicks90, kicks_180: kicks180 } = geometry();
 const pieces = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
 const colors = {
-  I: '#62d3ed', O: '#ecd17d', T: '#ba9bf1', S: '#70cfa9',
-  Z: '#e98ca5', J: '#82aaf2', L: '#eab286', normal: '#7186ae',
-  garbage: '#78869b', arriving: '#90c9ed', solid: '#a59169', cancelled: '#485674', overflow: '#ff95ab'
+  I: '#4fd8f5', O: '#f2cf5b', T: '#b78bfa', S: '#4ade80',
+  Z: '#fb7185', J: '#60a5fa', L: '#fb923c', normal: '#647aa3',
+  garbage: '#64748b', arriving: '#7dd3fc', solid: '#a59169', cancelled: '#3f4e6d', overflow: '#fb7185'
 };
 const byId = id => document.getElementById(id);
 const pair = ([x, y]) => `(${x}, ${y})`;
@@ -28,7 +28,7 @@ function block(x, y, size, type, outline = false) {
   if (outline) {
     return `<rect x="${x + 2}" y="${y + 2}" width="${size - 4}" height="${size - 4}" rx="3" fill="${color}" fill-opacity=".23" stroke="${color}" stroke-width="1.5" stroke-dasharray="3 2"/>`;
   }
-  return `<rect x="${x + 1}" y="${y + 1}" width="${size - 2}" height="${size - 2}" rx="2" fill="${color}"/><path d="M${x + 3} ${y + 3}h${size - 6}" stroke="#ffffff45" stroke-linecap="round"/>`;
+  return `<rect x="${x + 1}" y="${y + 1}" width="${size - 2}" height="${size - 2}" rx="2.5" fill="${color}"/><path d="M${x + 3} ${y + 3}h${size - 6}" stroke="#ffffff55" stroke-linecap="round"/>`;
 }
 
 function grid(x, y, cols, rows, size, shadeRows = 0) {
@@ -38,10 +38,10 @@ function grid(x, y, cols, rows, size, shadeRows = 0) {
   for (let column = 1; column < cols; column++) paths.push(`M${x + column * size} ${y}v${height}`);
   for (let row = 1; row < rows; row++) paths.push(`M${x} ${y + row * size}h${width}`);
   return [
-    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#091225"/>`,
-    shadeRows ? `<rect x="${x}" y="${y}" width="${width}" height="${shadeRows * size}" fill="#433760"/>` : '',
-    `<path d="${paths.join('')}" stroke="#2b3a56" fill="none"/>`,
-    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="none" stroke="#4a6387"/>`
+    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#080e1d"/>`,
+    shadeRows ? `<rect x="${x}" y="${y}" width="${width}" height="${shadeRows * size}" fill="#322854"/>` : '',
+    `<path d="${paths.join('')}" stroke="#233352" fill="none"/>`,
+    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="none" stroke="#455f8a"/>`
   ].join('');
 }
 
@@ -55,12 +55,12 @@ function board({ x, y, rows, size, base = 0, blocks = [], shadeRows = 0, markers
       const centerX = left + size / 2;
       const centerY = top + size / 2;
       if (type === 'front') {
-        return `<circle cx="${centerX}" cy="${centerY}" r="${size * .32}" fill="none" stroke="#ffe3a5" stroke-width="2"/>`;
+        return `<circle cx="${centerX}" cy="${centerY}" r="${size * .32}" fill="none" stroke="#fde68a" stroke-width="2"/>`;
       }
       if (type === 'rear') {
-        return `<rect x="${left + size * .22}" y="${top + size * .22}" width="${size * .56}" height="${size * .56}" rx="1" fill="none" stroke="#bfe9ff" stroke-width="2"/>`;
+        return `<rect x="${left + size * .22}" y="${top + size * .22}" width="${size * .56}" height="${size * .56}" rx="1" fill="none" stroke="#bae6fd" stroke-width="2"/>`;
       }
-      return `<path d="M${centerX - 4} ${centerY - 4}l8 8m-8 0 8-8" stroke="#ffe5ef" stroke-width="2" stroke-linecap="round"/>`;
+      return `<path d="M${centerX - 4} ${centerY - 4}l8 8m-8 0 8-8" stroke="#fecdd3" stroke-width="2" stroke-linecap="round"/>`;
     }).join('');
 }
 
@@ -83,7 +83,7 @@ function figure(id, width, height, drawing, description) {
     translated(cells[piece][rotation], origin).map(([x, y]) =>
       block(15 + x * size, 13 + (9 - y) * size, size, piece)).join('')).join('');
   byId('hero-art').innerHTML = svg(338, 246,
-    `<rect x="2" y="1" width="334" height="244" rx="13" fill="#0b1324" stroke="#455675"/>${heroBoard}${tiled}`);
+    `<rect x="2" y="1" width="334" height="244" rx="14" fill="#0a1222" stroke="#3b5178"/>${heroBoard}${tiled}`);
 }
 
 {
@@ -108,7 +108,7 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
   const drawPane = (x, pane, label) => board({ x, y: 34, rows, size, ...pane }) +
     text(x + 90, 20, label, 16);
   figure(id, 440, 45 + rows * size, drawPane(12, before, labels[0]) + drawPane(248, after, labels[1]) +
-    text(221, 41 + rows * size / 2, '→', 26, '#83cfff'), description);
+    text(221, 41 + rows * size / 2, '→', 26, '#5ed0ff'), description);
 }
 
 {
@@ -152,7 +152,7 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
   const bars = (x, y, count, color, faded = 0) => Array.from({ length: count }, (_, i) =>
     block(x + i * 23, y, 21, i < faded ? 'cancelled' : color)).join('');
   const pane = (x, title, rows) =>
-    `<rect x="${x}" y="7" width="220" height="146" rx="9" fill="#0c1628" stroke="#3c5275"/>` +
+    `<rect x="${x}" y="7" width="220" height="146" rx="9" fill="#0b1426" stroke="#3c5275"/>` +
     text(x + 13, 33, title, 17, '#e4edff', 'start') +
     rows.map(([label, count, type, faded = 0], i) =>
       text(x + 13, 66 + i * 33, label, 15, '#b8cbe7', 'start') +
@@ -160,7 +160,7 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
   figure('warning-figure', 482, 160,
     pane(6, '本回合 · A', [['旧预警 3', 3, 'cancelled'], ['打出 4', 4, 'T', 3], ['向 B 发 1', 1, 'T']]) +
     pane(256, '下一回合预警', [['A 收到 2', 2, 'J'], ['B 收到 1', 1, 'T']]) +
-    text(241, 92, '→', 22, '#83cfff'),
+    text(241, 92, '→', 22, '#5ed0ff'),
     '队列示意。A 的四行攻击中三行抵消旧预警，一行发送给 B。B 发送两行给 A，下一回合 A 看到两行预警，B 看到一行。');
 }
 
@@ -195,10 +195,10 @@ function comparison(id, before, after, description, labels = ['锁定后 · 清�
   const blocked = board({ x: 360, y: 52, rows: 4, size: 15, base: 20, shadeRows: 4,
     blocks: [[4, 21], ...spawn], markers: [[4, 21, 'collision']] });
   figure('overtime-figure', 518, 140, solid + overflow + blocked +
-    '<path d="M184 52h150" stroke="#ffb0c0" stroke-width="2" stroke-dasharray="4 3"/>' +
-    text(83, 26, '实心底层 +1', 18, '#ffdb9a') +
-    text(259, 26, '越过第 24 行', 18, '#ffc0d0') +
-    text(435, 26, '下一块出生受阻', 18, '#e5d8ff'),
+    '<path d="M184 52h150" stroke="#fda4af" stroke-width="2" stroke-dasharray="4 3"/>' +
+    text(83, 26, '实心底层 +1', 18, '#fde68a') +
+    text(259, 26, '越过第 24 行', 18, '#fecdd3') +
+    text(435, 26, '下一块出生受阻', 18, '#ddd6fe'),
     '左图最底部新增一行实心格，已有实心层和上方垃圾均被顶高一格。中图第 24 行上方出现越界方块，虚线标示顶边。右图虚线轮廓是下一块 T，已锁定格与其第 22 行第 5 列出生格重叠。');
 }
 
@@ -209,7 +209,7 @@ function shapeIcon(piece, points) {
   const pivotY = 1 + (3.5 - py) * size;
   const tiles = points.map(([x, y]) => block(1 + x * size, 1 + (3 - y) * size, size, piece)).join('');
   return svg(62, 62, grid(1, 1, 4, 4, size) + tiles +
-    `<path d="M${pivotX - 4} ${pivotY}h8m-4 -4v8" stroke="#102239" stroke-width="4" stroke-linecap="round"/><path d="M${pivotX - 4} ${pivotY}h8m-4 -4v8" stroke="#fff4dd" stroke-width="1.5" stroke-linecap="round"/>`,
+    `<path d="M${pivotX - 4} ${pivotY}h8m-4 -4v8" stroke="#0b1526" stroke-width="4" stroke-linecap="round"/><path d="M${pivotX - 4} ${pivotY}h8m-4 -4v8" stroke="#fff4dd" stroke-width="1.5" stroke-linecap="round"/>`,
     null, 'shape-icon');
 }
 
@@ -241,16 +241,59 @@ function geometryRows() {
 
 geometryRows();
 
-const topics = document.querySelectorAll('.topics a');
-function updateTopic() {
-  const hash = window.location.hash || '#board';
+/* Live Scrollspy + Hash sync for TOC */
+const topics = Array.from(document.querySelectorAll('.topics a'));
+function setActiveTopic(hash) {
   for (const link of topics) {
     if (link.hash === hash) link.setAttribute('aria-current', 'location');
     else link.removeAttribute('aria-current');
   }
 }
-updateTopic();
-window.addEventListener('hashchange', updateTopic);
+
+function updateTopicFromHash() {
+  setActiveTopic(window.location.hash || '#board');
+}
+updateTopicFromHash();
+window.addEventListener('hashchange', updateTopicFromHash);
+
+const sections = topics.map(link => document.querySelector(link.hash)).filter(Boolean);
+if ('IntersectionObserver' in window && sections.length) {
+  const observer = new IntersectionObserver(entries => {
+    const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+    if (visible.length) setActiveTopic(`#${visible[0].target.id}`);
+  }, { rootMargin: '-88px 0px -65% 0px', threshold: 0 });
+  sections.forEach(sec => observer.observe(sec));
+}
+
+/* One-click Copy buttons on Protocol JSONL <pre> blocks */
+for (const pre of document.querySelectorAll('.message pre')) {
+  const wrap = document.createElement('div');
+  wrap.className = 'code-block-wrap';
+  pre.parentNode.insertBefore(wrap, pre);
+  wrap.append(pre);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy-code-btn';
+  btn.textContent = '复制';
+  btn.setAttribute('aria-label', '复制样例代码');
+  btn.addEventListener('click', async () => {
+    const content = pre.textContent.trim();
+    try {
+      await navigator.clipboard.writeText(content);
+      btn.textContent = '已复制 ✓';
+      btn.dataset.copied = 'true';
+      setTimeout(() => {
+        btn.textContent = '复制';
+        delete btn.dataset.copied;
+      }, 1600);
+    } catch {
+      btn.textContent = '请手动复制';
+      setTimeout(() => { btn.textContent = '复制'; }, 1600);
+    }
+  });
+  wrap.append(btn);
+}
 
 async function showObservations() {
   try {
@@ -258,7 +301,7 @@ async function showObservations() {
     const observationLine = (requestId, remainingMs) => JSON.stringify({
       type: 'OBSERVE', request_id: requestId, remaining_ms: remainingMs, observation: duel.observe(0)
     }) + '\n';
-    byId('observe-example').textContent = observationLine('1', DEFAULT_RULES.think_ms);
+    byId('observe-example').textContent = observationLine('1', DEFAULT_RULES.first_think_ms);
     duel.hold(0);
     byId('observe-after-hold').textContent = observationLine('2', 860);
   } catch {
