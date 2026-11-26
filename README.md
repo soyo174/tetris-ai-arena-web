@@ -1,39 +1,39 @@
 # TETRA ARENA · 公开网页
 
-这个仓库是 TETRA ARENA 的公开静态网页镜像，提供浏览器 AI 方块对战、图解规则、本地 JSONL 回放和 Python Bot 示例下载。
+TETRA ARENA 是一个 AI 俄罗斯方块对战平台。这里发布浏览器竞技场、图解规则、天梯入口、JSONL 回放和 Bot 下载文件。
 
-**公网访问：[https://soyo174.github.io/tetris-ai-arena-web/](https://soyo174.github.io/tetris-ai-arena-web/)**
+[打开 TETRA ARENA](https://soyo174.github.io/tetris-ai-arena-web/)
 
-原始项目 `soyo174/tetris-ai-arena` 保持私有。本仓库只收录公开网页及示例文件，不包含 Python 天梯服务、账号数据、参赛者上传源码或私有比赛数据。
+## 当前版本
+
+前端与线上天梯使用 v0.5.3 裁判规则。对战采用 60 FPS 异步结算和 Next 5 预览，裁判按席位累计实际思考耗时并折算为帧。每局首块的基础预算为 1000 ms，后续每块为 100 ms。Bot 另有每局共享的 2000 ms 时间池。
+
+天梯支持 27 种语言。单次上传一个 UTF-8 源文件，上限 256 KiB。弱、中、强三档官方练习 Bot 均提供可单独上传的 C++20 源码。
 
 ## 页面与示例
 
 | 入口 | 内容 |
 |---|---|
-| [竞技场](./index.html) | 内置 AI 对战、对局种子、暂停、单步、调速，以及本地 JSONL 回放导入与导出 |
-| [图解规则](./rules.html) | 单挑规则、棋盘图例、方块与旋转表、Bot 通信协议 |
-| [天梯](./ladder.html) | 注册、上传 Bot、发起对战、查看排行榜和回放 |
-| [起步 Bot](./examples/starter_bot.py) | 最小通信协议示例 |
-| [弱基准 Bot](./examples/weak_bot.py) | 基础策略示例 |
-| [中基准 Bot](./examples/medium_bot.py) | 中档策略示例 |
-| [强基准 Bot](./examples/strong_bot.py) | 较强搜索策略示例 |
-
-公开测试期间，网页直接连接 TETRA ARENA 比赛 API。天梯支持 27 种语言，每次提交一个不超过 256 KiB 的 UTF-8 源文件。每局首回合限时 1000 ms，随后每回合限时 50 ms。注册、自定义对战、Elo 排行榜和回放均可在 GitHub Pages 上使用。
+| [竞技场](./index.html) | 内置 AI 对战、官方回放、单步和调速、本地 JSONL 回放导入与导出 |
+| [图解规则](./rules.html) | 对战规则、T-Spin 图例、旋转与踢墙、Bot 通信协议 |
+| [天梯](./ladder.html) | 注册、上传 Bot、自定义对战、排位与回放 |
+| [Python 起步示例](./examples/starter_bot.py) | 演示最小 JSONL 通信 |
+| [弱基准 Bot](./examples/weak_bot.cpp) | C++20 单文件 |
+| [中基准 Bot](./examples/medium_bot.cpp) | C++20 单文件 |
+| [强基准 Bot](./examples/strong_bot.cpp) | C++20 单文件 |
 
 ## 发布与更新
 
-GitHub Pages 使用 **Deploy from a branch**，发布源为 **`main` 分支的仓库根目录 `/ (root)`**。推送更新到 `main` 后，GitHub Pages 自动发布静态文件，无需安装依赖或构建前端。
+本仓库发布原项目 `web/dist` 中的公开静态文件。GitHub Pages 从 `main` 分支的仓库根目录发布。页面通过 `index.html` 和 `ladder.html` 中的 `tetra-api-base` 配置连接线上天梯 API。
 
-同步时复制原始项目 `web/dist` 中已跟踪的公开文件，在 `index.html` 和 `ladder.html` 的 `tetra-api-base` 中填写测试 API 基址，并保留本 README。不要同步 Python 缓存、服务器目录或比赛数据。
-
-所有页面、脚本、样式和下载链接使用相对路径，支持 GitHub Pages 的仓库子路径。
+更新时同步源项目跟踪的公开文件，并保留生产 API 配置、`.nojekyll` 和本 README。页面、脚本、样式和下载链接使用相对路径。
 
 ## 本地预览
 
-在本仓库目录启动静态文件服务器：
+在仓库根目录运行以下命令，然后打开浏览器竞技场或规则页。
 
 ```bash
 python -m http.server 8000
 ```
 
-然后打开 `http://localhost:8000/`。浏览器竞技场和规则页需要启用 JavaScript；天梯说明页及 Bot 下载无需 JavaScript。
+[打开本地竞技场](http://localhost:8000/)
